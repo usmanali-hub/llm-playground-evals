@@ -1,7 +1,8 @@
 # llm-playground-evals
 
-A small, tested layer for talking to chat LLMs: system prompts, multi-turn history, streaming, token and cost
-accounting, and a deterministic offline provider so the whole thing can be tested and demonstrated without an API key.
+A small, tested layer for talking to chat LLMs: system prompts, multi-turn history, streaming, retries, structured
+JSON extraction checked against a schema, token and cost accounting, and a deterministic offline provider so the whole
+thing can be tested and demonstrated without an API key.
 It has no runtime dependencies (standard library only) and is the base for later experiments in this repo
 (structured output, prompt patterns, evaluations).
 
@@ -23,6 +24,37 @@ python -m llm_playground chat --provider anthropic --model <model-name> --system
 `--provider openai` speaks the OpenAI chat-completions format, and `--provider local` speaks the same format to a local
 server (Ollama by default at `localhost:11434`, or any vLLM / llama.cpp server via `--url`) and needs no key.
 Model names and prices are never built in: they change, so you pass the ones you use.
+
+## Structured output: JSON that matches a schema
+
+```python
+from llm_playground import Chat, extract_structured
+
+result = extract_structured(chat, "Invoice from Acme Tools: 3 bolts, total 12.50 USD.", schema, max_repairs=2)
+result.data  # a dict that has been validated against the schema
+result.attempts  # 1 means the first reply was already valid
+```
+
+```bash
+python -m llm_playground extract "Invoice from Acme Tools: 3 bolts, total 12.50 USD." \
+    --schema examples/invoice_schema.json --provider anthropic --model <model-name>
+python examples/repair_demo.py     # offline: a scripted model makes three mistakes, the loop fixes them
+```
+
+How it works: the prompt carries the schema and the text; the reply is parsed (bare JSON, a fenced block, or JSON inside
+prose; `NaN` and `Infinity` are rejected); it is validated; if it is invalid, the errors (with their JSON paths, for
+example `$.items[0].qty: 0 is below the minimum 1`) go back to the model in the same conversation and it is asked for
+corrected JSON, up to `max_repairs` times. A reply cut off at the token limit gets a "keep it shorter" hint. Usage
+counts every attempt, so repairs show up in the cost.
+
+* The validator (`schema.py`) implements a documented subset of JSON Schema and **raises on any keyword it does not
+  implement** (`oneOf`, `$ref`, ...) instead of silently ignoring a constraint.
+* Validation proves the *shape* is right, not that the values are true: a model can return a valid object with the wrong
+  total. Check values that matter separately.
+* This is the portable prompt-parse-validate-repair loop. Provider-native modes (forced tool calls, JSON mode) are not
+  implemented here and would reduce how often repairs are needed.
+* `examples/repair_demo.py` uses hand-written replies that look like common mistakes. It shows how the harness reacts;
+  it says nothing about how often a real model makes them.
 
 ## How it is put together
 
@@ -53,8 +85,9 @@ flowchart LR
 
 ## What is and is not verified
 
-* 52 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
-  invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, and the CLI. CI runs
+* 96 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+  invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
+  extraction and repair, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.
 * **HTTP tests use a real server on localhost.** `tests/test_http_end_to_end.py` sends the actual urllib requests to a local
   server that replays recorded-shape payloads, so the request headers and body, status handling, `Retry-After`, streaming
@@ -64,7 +97,7 @@ flowchart LR
   until you run it with a real key.
 * Token counts from the offline fake are estimates (about 4 characters per token). Real providers report exact counts,
   which is what `Usage` records.
-* Not built yet: structured output, prompt caching, async batching, and measured local-model serving.
+* Not built yet: prompt caching, async batching, and measured local-model serving.
 
 ## Layout
 
@@ -76,6 +109,9 @@ src/llm_playground/
   providers.py   Anthropic, OpenAI-compatible, offline fake; pure parsing functions
   pricing.py     cost from token counts and your prices
   retry.py       RetryingProvider: backoff, jitter, Retry-After
+  schema.py      JSON Schema subset validator (refuses unsupported keywords)
+  extract.py     extract_json, extract_structured: parse, validate, repair
   client.py      Chat: history, usage totals, failure-safe streaming
+examples/        invoice schema and an offline repair demo
 tests/           parser, provider, retry, client, CLI and localhost HTTP tests
 ```

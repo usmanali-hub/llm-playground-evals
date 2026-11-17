@@ -21,3 +21,4 @@ jobs:
       - run: pytest
       - name: Offline demo
         run: python -m llm_playground chat --provider fake --system "Answer briefly." --stream "What is a token?"
+      - run: python examples/repair_demo.py

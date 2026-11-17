@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 
 from llm_playground.client import Chat
+from llm_playground.extract import StructuredOutputError, extract_structured
 from llm_playground.pricing import Pricing
 from llm_playground.providers import AnthropicProvider, FakeProvider, OpenAICompatProvider, Provider
 from llm_playground.retry import RetryingProvider
+from llm_playground.schema import SchemaError
 from llm_playground.types import ProviderError
 
 OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
@@ -27,8 +30,8 @@ def build_provider(name: str, url: str | None) -> Provider:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="llm_playground", description=__doc__)
-    parser.add_argument("command", choices=["chat"])
-    parser.add_argument("prompt")
+    parser.add_argument("command", choices=["chat", "extract"])
+    parser.add_argument("prompt", help="the message to send (chat) or the text to extract from (extract)")
     parser.add_argument("--provider", choices=["fake", "anthropic", "openai", "local"], default="fake")
     parser.add_argument("--model", help="model name; required for every provider except fake")
     parser.add_argument("--system", help="system prompt")
@@ -36,6 +39,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-tokens", type=int, default=1024)
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--url", help="endpoint for openai-compatible servers (default: Ollama for --provider local)")
+    parser.add_argument("--schema", help="extract: path to a JSON Schema file the reply must match")
+    parser.add_argument(
+        "--repairs", type=int, default=2, help="extract: times to ask the model to fix an invalid reply"
+    )
     parser.add_argument(
         "--retries", type=int, default=3, help="extra attempts for overload, rate limit or dropped connection"
     )
@@ -43,6 +50,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--price-out", type=float, help="your price per million output tokens")
     args = parser.parse_args(argv)
 
+    if args.command == "extract" and not args.schema:
+        parser.error("extract needs --schema")
     if args.provider != "fake" and not args.model:
         parser.error("--model is required unless --provider fake")
     if (args.price_in is None) != (args.price_out is None):
@@ -57,13 +66,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             temperature=args.temperature,
             pricing=pricing,
         )
-        if args.stream:
+        if args.command == "extract":
+            with open(args.schema, encoding="utf-8") as handle:
+                schema = json.load(handle)
+            found = extract_structured(chat, args.prompt, schema, max_repairs=args.repairs)
+            print(json.dumps(found.data, indent=2, ensure_ascii=False))
+            print(f"attempts: {found.attempts} (1 means the first reply was already valid)")
+        elif args.stream:
             for piece in chat.stream(args.prompt):
                 print(piece, end="", flush=True)
             print()
         else:
             print(chat.send(args.prompt).text)
-    except ProviderError as err:
+    except (ProviderError, StructuredOutputError, SchemaError, OSError, json.JSONDecodeError) as err:
         print(f"error: {err}", file=sys.stderr)
         return 1
     line = f"tokens: in={chat.usage.input_tokens} out={chat.usage.output_tokens} total={chat.usage.total}"

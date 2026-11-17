@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "properties": {
+    "vendor": {"type": "string", "minLength": 1},
+    "total": {"type": "number", "minimum": 0},
+    "currency": {"enum": ["USD", "EUR", "PKR"]},
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {"name": {"type": "string"}, "qty": {"type": "integer", "minimum": 1}},
+        "required": ["name", "qty"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["vendor", "total", "currency", "items"],
+  "additionalProperties": false
+}

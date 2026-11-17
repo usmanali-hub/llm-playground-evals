@@ -211,6 +211,18 @@ def default_reply(request: ChatRequest) -> str:
     return f"(offline fake model){style} You said: {last}"
 
 
+def scripted_reply(replies: list[str]) -> Callable[[ChatRequest], str]:
+    """A reply function for FakeProvider that returns the given replies in order (the last one repeats)."""
+    state = {"i": 0}
+
+    def reply(request: ChatRequest) -> str:
+        text = replies[min(state["i"], len(replies) - 1)]
+        state["i"] += 1
+        return text
+
+    return reply
+
+
 class FakeProvider:
     """Deterministic provider for tests and offline demos. It is not a language model."""
 
