@@ -33,8 +33,9 @@ flowchart LR
     P --> A[Anthropic Messages API]
     P --> O[OpenAI-compatible: OpenAI, Ollama, vLLM, llama.cpp]
     P --> F[Offline fake]
-    A --> T[Transport: urllib, the only network code]
-    O --> T
+    A --> R[Retry: backoff, jitter, Retry-After]
+    O --> R
+    R --> T[Transport: urllib, the only network code]
     T --> S[SSE parser -> text / usage / stop events]
 ```
 
@@ -45,19 +46,25 @@ flowchart LR
   the response with pure functions, so parsing is tested against recorded-shape payloads instead of the network.
 * **Streaming** goes through one small server-sent-events parser. A stream that ends before the final event
   (`message_stop` or `[DONE]`) raises instead of returning a truncated answer, and provider error events become errors.
+* **Retries** (`RetryingProvider`, on by default in the CLI with `--retries`) wait with exponential backoff and full jitter, honour
+  a server's `Retry-After`, and retry only errors marked retryable (overload, rate limits, 5xx, dropped connections), never
+  a bad request. A stream is retried only if it failed before producing any text, so output is never repeated.
 * **Errors** never contain credentials: header values are scrubbed from error text and it is truncated.
 
 ## What is and is not verified
 
-* 32 tests cover the SSE parser, both request builders, response and stream parsing (including dropped streams, error
-  events and invalid JSON), history and usage handling, cost arithmetic, missing keys and the CLI. CI runs ruff, strict
-  mypy, the tests and the offline demo.
-* **Nothing here has been run against a live API in CI.** The payload shapes in `tests/fakes.py` follow the providers'
+* 52 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+  invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, and the CLI. CI runs
+  ruff, strict mypy, the tests and the offline demo.
+* **HTTP tests use a real server on localhost.** `tests/test_http_end_to_end.py` sends the actual urllib requests to a local
+  server that replays recorded-shape payloads, so the request headers and body, status handling, `Retry-After`, streaming
+  over a socket, key redaction, and recovery from an overloaded server run for real, just not against a provider.
+* **Nothing here has been run against a live provider.** The payload shapes in `tests/fakes.py` follow the providers'
   documented formats; they are not captures from live calls, so a provider changing its format would not be caught
   until you run it with a real key.
 * Token counts from the offline fake are estimates (about 4 characters per token). Real providers report exact counts,
   which is what `Usage` records.
-* Not built yet: retries and backoff, structured output, prompt caching, async batching, and measured local-model serving.
+* Not built yet: structured output, prompt caching, async batching, and measured local-model serving.
 
 ## Layout
 
@@ -68,6 +75,7 @@ src/llm_playground/
   transport.py   urllib HTTP, error scrubbing (the only network code)
   providers.py   Anthropic, OpenAI-compatible, offline fake; pure parsing functions
   pricing.py     cost from token counts and your prices
+  retry.py       RetryingProvider: backoff, jitter, Retry-After
   client.py      Chat: history, usage totals, failure-safe streaming
-tests/           parser, provider, client and CLI tests with recorded-shape payloads
+tests/           parser, provider, retry, client, CLI and localhost HTTP tests
 ```

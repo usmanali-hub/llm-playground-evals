@@ -120,3 +120,24 @@ def test_fake_provider_is_deterministic_and_streams_the_same_text() -> None:
 
 def test_estimate_tokens() -> None:
     assert estimate_tokens("") == 0 and estimate_tokens("abcd") == 1 and estimate_tokens("abcde") == 2
+
+
+def test_overload_error_events_are_retryable_but_other_stream_errors_are_not() -> None:
+    def failing(kind: str) -> ProviderError:
+        lines = [f'event: error\ndata: {{"type":"error","error":{{"type":"{kind}","message":"x"}}}}\n\n']
+        provider = AnthropicProvider(api_key="sk-test-key-12345", transport=FakeTransport(stream_lines=lines))
+        with pytest.raises(ProviderError) as info:
+            list(provider.stream(REQUEST))
+        return info.value
+
+    assert failing("overloaded_error").retryable and failing("rate_limit_error").retryable
+    assert not failing("invalid_request_error").retryable
+
+
+def test_a_dropped_stream_is_marked_retryable() -> None:
+    provider = AnthropicProvider(
+        api_key="sk-test-key-12345", transport=FakeTransport(stream_lines=ANTHROPIC_STREAM[:5])
+    )
+    with pytest.raises(ProviderError) as info:
+        list(provider.stream(REQUEST))
+    assert info.value.retryable

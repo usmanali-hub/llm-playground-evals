@@ -11,9 +11,17 @@ Role = Literal["user", "assistant"]
 class ProviderError(RuntimeError):
     """A provider call failed. The message never contains credentials."""
 
-    def __init__(self, message: str, status: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status: int | None = None,
+        retryable: bool = False,
+        retry_after: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.status = status
+        self.retryable = retryable  # worth trying again (overload, rate limit, dropped connection), not a bad request
+        self.retry_after = retry_after  # seconds the server asked us to wait, if it said
 
 
 @dataclass(frozen=True)

@@ -75,7 +75,11 @@ def anthropic_events(lines: Iterable[str]) -> Iterator[StreamEvent]:
         payload = _load(data)
         if event == "error":
             error = payload.get("error") or {}
-            raise ProviderError(f"stream error: {error.get('type', 'unknown')}: {error.get('message', '')}"[:300])
+            kind = str(error.get("type", "unknown"))
+            raise ProviderError(
+                f"stream error: {kind}: {error.get('message', '')}"[:300],
+                retryable=kind in {"overloaded_error", "rate_limit_error", "api_error"},
+            )
         if event == "message_start":
             input_tokens = _int(((payload.get("message") or {}).get("usage") or {}).get("input_tokens"))
         elif event == "content_block_delta":
@@ -89,7 +93,7 @@ def anthropic_events(lines: Iterable[str]) -> Iterator[StreamEvent]:
             yield StreamEvent("usage", usage=Usage(input_tokens, output_tokens))
             yield StreamEvent("stop", stop_reason=stop_reason)
             return
-    raise ProviderError("stream ended before message_stop (connection dropped?)")
+    raise ProviderError("stream ended before message_stop (connection dropped?)", retryable=True)
 
 
 class AnthropicProvider:
@@ -165,7 +169,7 @@ def openai_events(lines: Iterable[str]) -> Iterator[StreamEvent]:
         if payload.get("usage"):
             u = payload["usage"]
             usage = Usage(_int(u.get("prompt_tokens")), _int(u.get("completion_tokens")))
-    raise ProviderError("stream ended before [DONE] (connection dropped?)")
+    raise ProviderError("stream ended before [DONE] (connection dropped?)", retryable=True)
 
 
 class OpenAICompatProvider:
@@ -233,7 +237,7 @@ class FakeProvider:
         pieces[-1] = pieces[-1].rstrip(" ")
         for index, piece in enumerate(pieces):
             if self._fail_after is not None and index >= self._fail_after:
-                raise ProviderError("simulated connection drop")
+                raise ProviderError("simulated connection drop", retryable=True)
             yield StreamEvent("text", text=piece)
         yield StreamEvent("usage", usage=self._usage(request, text))
         yield StreamEvent("stop", stop_reason="end_turn")

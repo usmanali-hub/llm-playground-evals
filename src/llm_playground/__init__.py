@@ -3,6 +3,7 @@
 from llm_playground.client import Chat
 from llm_playground.pricing import Pricing
 from llm_playground.providers import AnthropicProvider, FakeProvider, OpenAICompatProvider
+from llm_playground.retry import RetryingProvider
 from llm_playground.types import ChatRequest, ChatResult, Message, ProviderError, StreamEvent, Usage
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "OpenAICompatProvider",
     "Pricing",
     "ProviderError",
+    "RetryingProvider",
     "StreamEvent",
     "Usage",
 ]

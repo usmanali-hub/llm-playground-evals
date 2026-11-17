@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from llm_playground.client import Chat
 from llm_playground.pricing import Pricing
 from llm_playground.providers import AnthropicProvider, FakeProvider, OpenAICompatProvider, Provider
+from llm_playground.retry import RetryingProvider
 from llm_playground.types import ProviderError
 
 OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
@@ -35,6 +36,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-tokens", type=int, default=1024)
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--url", help="endpoint for openai-compatible servers (default: Ollama for --provider local)")
+    parser.add_argument(
+        "--retries", type=int, default=3, help="extra attempts for overload, rate limit or dropped connection"
+    )
     parser.add_argument("--price-in", type=float, help="your price per million input tokens")
     parser.add_argument("--price-out", type=float, help="your price per million output tokens")
     args = parser.parse_args(argv)
@@ -46,7 +50,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     pricing = Pricing(args.price_in, args.price_out) if args.price_in is not None else None
     try:
         chat = Chat(
-            build_provider(args.provider, args.url),
+            RetryingProvider(build_provider(args.provider, args.url), max_attempts=args.retries + 1),
             args.model or "fake",
             system=args.system,
             max_tokens=args.max_tokens,
