@@ -25,6 +25,19 @@ python -m llm_playground chat --provider anthropic --model <model-name> --system
 server (Ollama by default at `localhost:11434`, or any vLLM / llama.cpp server via `--url`) and needs no key.
 Model names and prices are never built in: they change, so you pass the ones you use.
 
+## Prompt patterns: zero-shot, few-shot, chain of thought
+
+`prompts.py` has pure builders (`zero_shot_prompt`, `few_shot_prompt`, `cot_prompt`), answer parsers
+(`parse_final_answer` takes the text after the *last* `Answer:`; `parse_plain_answer` the first line) and
+`compare_patterns(provider, model, patterns, cases)`, which runs each pattern on each case in a fresh conversation and
+reports correct count, replies that could not be parsed, and output tokens.
+
+* Few-shot examples mostly teach format and labels; their order and balance can bias the answer. Chain of thought asks
+  for reasoning before a marked final answer, which costs more output tokens and only sometimes helps.
+* The tests check the exact prompt text, parsing edge cases and scoring. `examples/patterns_demo.py` uses a hand-scripted
+  model whose answers were chosen in advance, so its table is **not evidence about any real model**. Judging a pattern
+  needs a real model, many cases and repeated runs.
+
 ## Structured output: JSON that matches a schema
 
 ```python
@@ -92,7 +105,7 @@ flowchart LR
 
 ## What is and is not verified
 
-* 136 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 148 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
   extraction and repair, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.
