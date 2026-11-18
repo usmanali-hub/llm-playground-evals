@@ -9,7 +9,7 @@ from llm_playground.providers import (
     openai_body,
 )
 from llm_playground.transport import scrub
-from llm_playground.types import ChatRequest, Message, ProviderError, Usage
+from llm_playground.types import ChatRequest, Message, ProviderError, ToolSpec, Usage
 from tests.fakes import ANTHROPIC_STREAM, OPENAI_STREAM, FakeTransport
 
 REQUEST = ChatRequest("some-model", (Message("user", "Hi"),), system="Be brief.", max_tokens=50, temperature=0.2)
@@ -141,3 +141,46 @@ def test_a_dropped_stream_is_marked_retryable() -> None:
     with pytest.raises(ProviderError) as info:
         list(provider.stream(REQUEST))
     assert info.value.retryable
+
+
+TOOL = ToolSpec("record", "Record it.", {"type": "object", "properties": {"n": {"type": "integer"}}})
+TOOL_REQUEST = ChatRequest("m", (Message("user", "hi"),), tool=TOOL)
+
+
+def test_anthropic_tool_request_and_response() -> None:
+    body = anthropic_body(TOOL_REQUEST, stream=False)
+    assert body["tools"] == [{"name": "record", "description": "Record it.", "input_schema": TOOL.schema}]
+    assert body["tool_choice"] == {"type": "tool", "name": "record"}
+    reply = {
+        "content": [{"type": "tool_use", "name": "record", "input": {"n": 4}}],
+        "usage": {},
+        "stop_reason": "tool_use",
+    }
+    result = AnthropicProvider(api_key="sk-test-key-12345", transport=FakeTransport(json_reply=reply)).complete(
+        TOOL_REQUEST
+    )
+    assert result.tool_input == {"n": 4} and result.text == ""
+
+
+def test_openai_tool_request_and_response() -> None:
+    body = openai_body(TOOL_REQUEST, stream=False)
+    assert body["tools"][0]["function"] == {"name": "record", "description": "Record it.", "parameters": TOOL.schema}
+    assert body["tool_choice"] == {"type": "function", "function": {"name": "record"}}
+    call = {"function": {"name": "record", "arguments": '{"n": 4}'}}
+    reply = {"choices": [{"message": {"content": None, "tool_calls": [call]}, "finish_reason": "tool_calls"}]}
+    result = OpenAICompatProvider(api_key="k" * 12, transport=FakeTransport(json_reply=reply)).complete(TOOL_REQUEST)
+    assert result.tool_input == {"n": 4}
+
+
+def test_openai_non_json_arguments_come_back_as_text() -> None:
+    call = {"function": {"name": "record", "arguments": "{n: 4"}}
+    reply = {"choices": [{"message": {"content": None, "tool_calls": [call]}, "finish_reason": "length"}]}
+    result = OpenAICompatProvider(api_key="k" * 12, transport=FakeTransport(json_reply=reply)).complete(TOOL_REQUEST)
+    assert result.tool_input is None and result.text == "{n: 4"
+
+
+@pytest.mark.parametrize("cls", [AnthropicProvider, OpenAICompatProvider])
+def test_streaming_a_forced_tool_call_is_refused(cls: type) -> None:
+    provider = cls(api_key="k" * 12, transport=FakeTransport())
+    with pytest.raises(ProviderError, match="streaming a forced tool call"):
+        list(provider.stream(TOOL_REQUEST))

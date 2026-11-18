@@ -7,6 +7,7 @@ import json
 import sys
 from collections.abc import Sequence
 
+from llm_playground.checks import grounded_in_text
 from llm_playground.client import Chat
 from llm_playground.extract import StructuredOutputError, extract_structured
 from llm_playground.pricing import Pricing
@@ -43,6 +44,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--repairs", type=int, default=2, help="extract: times to ask the model to fix an invalid reply"
     )
+    parser.add_argument("--native", action="store_true", help="extract: force a tool call instead of asking for JSON")
+    parser.add_argument(
+        "--ground",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="extract: require the value at this path (items[].name for lists) to be in the text; repeatable",
+    )
     parser.add_argument(
         "--retries", type=int, default=3, help="extra attempts for overload, rate limit or dropped connection"
     )
@@ -69,7 +78,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "extract":
             with open(args.schema, encoding="utf-8") as handle:
                 schema = json.load(handle)
-            found = extract_structured(chat, args.prompt, schema, max_repairs=args.repairs)
+            checks = [grounded_in_text(args.prompt, args.ground)] if args.ground else []
+            found = extract_structured(
+                chat, args.prompt, schema, max_repairs=args.repairs, native=args.native, checks=checks
+            )
             print(json.dumps(found.data, indent=2, ensure_ascii=False))
             print(f"attempts: {found.attempts} (1 means the first reply was already valid)")
         elif args.stream:

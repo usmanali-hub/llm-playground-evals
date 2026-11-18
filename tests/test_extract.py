@@ -138,3 +138,45 @@ def test_long_error_lists_are_truncated_in_the_repair_prompt() -> None:
 def test_build_prompt_includes_instruction_schema_and_text() -> None:
     prompt = build_prompt("the text", {"type": "string"}, "Do the thing.")
     assert prompt.startswith("Do the thing.") and '"type": "string"' in prompt and prompt.endswith("the text")
+
+
+def test_value_checks_send_their_problems_back_to_the_model() -> None:
+    def adult(data: object) -> list[str]:
+        return [] if isinstance(data, dict) and data["age"] >= 18 else ["$.age: must be an adult"]
+
+    chat, provider = chat_with('{"name": "Sam", "age": 9}', GOOD)
+    result = extract_structured(chat, "x", SCHEMA, checks=[adult])
+    assert result.attempts == 2 and result.data["age"] == 31
+    assert "must be an adult" in provider.requests[1].messages[-1].content
+
+
+def record(calls: list[object], data: object) -> list[str]:
+    calls.append(data)
+    return []
+
+
+def test_checks_do_not_run_when_the_schema_already_fails() -> None:
+    calls: list[object] = []
+    chat, _ = chat_with('{"name": "Sam"}', GOOD)
+    extract_structured(chat, "x", SCHEMA, checks=[lambda d: record(calls, d)])
+    assert calls == [{"name": "Aisha", "age": 31}]
+
+
+def test_native_mode_forces_the_tool_and_uses_its_arguments_as_data() -> None:
+    chat, provider = chat_with(GOOD)
+    result = extract_structured(chat, "Aisha is 31", SCHEMA, native=True, tool_name="record_person")
+    tool = provider.requests[0].tool
+    assert result.data == {"name": "Aisha", "age": 31} and tool is not None
+    assert tool.name == "record_person" and tool.schema == SCHEMA
+    assert "Call the record_person tool" in provider.requests[0].messages[-1].content
+
+
+def test_native_mode_still_validates_and_repairs() -> None:
+    chat, _ = chat_with('{"name": "Aisha", "age": -1}', GOOD)
+    assert extract_structured(chat, "x", SCHEMA, native=True).attempts == 2
+
+
+def test_native_mode_needs_an_object_schema() -> None:
+    chat, _ = chat_with("[]")
+    with pytest.raises(ValueError, match="type 'object'"):
+        extract_structured(chat, "x", {"type": "array"}, native=True)

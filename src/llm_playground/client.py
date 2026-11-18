@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Generator
 
 from llm_playground.pricing import Pricing
 from llm_playground.providers import Provider
-from llm_playground.types import ChatRequest, ChatResult, Message, ProviderError, Usage
+from llm_playground.types import ChatRequest, ChatResult, Message, ProviderError, ToolSpec, Usage
 
 
 class Chat:
@@ -29,22 +30,28 @@ class Chat:
         self.usage = Usage()
         self.last_result: ChatResult | None = None
 
-    def _request(self, text: str) -> ChatRequest:
+    def _request(self, text: str, tool: ToolSpec | None = None) -> ChatRequest:
         if not text.strip():
             raise ValueError("message is empty")
         messages = (*self.history, Message("user", text))
-        return ChatRequest(self.model, messages, self.system, self.max_tokens, self.temperature)
+        return ChatRequest(self.model, messages, self.system, self.max_tokens, self.temperature, tool)
 
     def _commit(self, text: str, result: ChatResult) -> None:
         # History only grows with complete user/assistant pairs, so roles keep alternating after a failure.
-        if not result.text.strip():
+        # A forced tool call has no text; its arguments are kept in the history as JSON text so roles stay plain.
+        reply = (
+            result.text
+            if result.text.strip()
+            else (json.dumps(result.tool_input) if result.tool_input is not None else "")
+        )
+        if not reply.strip():
             raise ProviderError("the model returned an empty reply")
-        self.history += [Message("user", text), Message("assistant", result.text)]
+        self.history += [Message("user", text), Message("assistant", reply)]
         self.usage += result.usage
         self.last_result = result
 
-    def send(self, text: str) -> ChatResult:
-        result = self.provider.complete(self._request(text))
+    def send(self, text: str, tool: ToolSpec | None = None) -> ChatResult:
+        result = self.provider.complete(self._request(text, tool))
         self._commit(text, result)
         return result
 

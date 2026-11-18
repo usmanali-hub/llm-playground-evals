@@ -2,12 +2,15 @@
 
 It supports the subset that matters for extraction and refuses (raises ``SchemaError``) on any keyword it does not
 implement, so an unsupported constraint is never silently ignored. Supported: type (one name or a list), enum, const,
-properties, required, additionalProperties (false or a schema), items (one schema), minItems, maxItems, minLength,
-maxLength, minimum, maximum, pattern, anyOf, plus the annotation keywords title, description, default and examples.
+properties, required, additionalProperties (false or a schema), items, prefixItems, uniqueItems, minItems, maxItems,
+minLength, maxLength, minimum, maximum, pattern, anyOf, oneOf, allOf, local ``$ref`` ("#" or "#/path/to/subschema")
+with ``$defs`` / ``definitions``, plus the annotation keywords title, description, default and examples.
+Not supported: remote ``$ref``, ``not``, ``if/then/else``, ``format``, ``patternProperties`` and ``dependentRequired``.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -15,7 +18,9 @@ ANNOTATIONS = {"title", "description", "default", "examples"}
 KEYWORDS = ANNOTATIONS | {
     "type", "enum", "const", "properties", "required", "additionalProperties", "items",
     "minItems", "maxItems", "minLength", "maxLength", "minimum", "maximum", "pattern", "anyOf",
+    "oneOf", "allOf", "$ref", "$defs", "definitions", "prefixItems", "uniqueItems",
 }  # fmt: skip
+MAX_REF_DEPTH = 200
 TYPES = {"string", "integer", "number", "boolean", "null", "array", "object"}
 
 
@@ -41,8 +46,27 @@ def json_type(value: Any) -> str:
     return type(value).__name__
 
 
-def check_schema(schema: Any, path: str = "$") -> None:
+def resolve_ref(root: Any, ref: str, path: str = "$") -> Any:
+    """Follow a local ``$ref`` ("#" or a JSON pointer such as "#/$defs/address") inside the root schema."""
+    if not isinstance(ref, str) or not (ref == "#" or ref.startswith("#/")):
+        raise SchemaError(f"{path}: only local references starting with '#' are supported, got {ref!r}")
+    node = root
+    if ref == "#":
+        return node
+    for part in ref[2:].split("/"):
+        key = part.replace("~1", "/").replace("~0", "~")
+        if isinstance(node, dict) and key in node:
+            node = node[key]
+        elif isinstance(node, list) and key.isdigit() and int(key) < len(node):
+            node = node[int(key)]
+        else:
+            raise SchemaError(f"{path}: reference {ref!r} does not point to anything in the schema")
+    return node
+
+
+def check_schema(schema: Any, path: str = "$", root: Any = None) -> None:
     """Raise SchemaError if the schema is malformed or uses an unsupported keyword."""
+    root = schema if root is None else root
     if schema is True or schema is False:
         return
     if not isinstance(schema, dict):
@@ -61,21 +85,31 @@ def check_schema(schema: Any, path: str = "$") -> None:
         isinstance(schema["required"], list) and all(isinstance(r, str) for r in schema["required"])
     ):
         raise SchemaError(f"{path}: required must be a list of strings")
-    for key in ("properties",):
+    for key in ("properties", "$defs", "definitions"):
         if key in schema:
             if not isinstance(schema[key], dict):
-                raise SchemaError(f"{path}: properties must be an object")
+                raise SchemaError(f"{path}: {key} must be an object")
             for name, sub in schema[key].items():
-                check_schema(sub, f"{path}.{name}")
+                check_schema(sub, f"{path}.{name}", root)
     if "items" in schema:
-        check_schema(schema["items"], f"{path}[]")
+        check_schema(schema["items"], f"{path}[]", root)
+    if "prefixItems" in schema:
+        if not isinstance(schema["prefixItems"], list) or not schema["prefixItems"]:
+            raise SchemaError(f"{path}: prefixItems must be a non-empty list of schemas")
+        for i, sub in enumerate(schema["prefixItems"]):
+            check_schema(sub, f"{path}[{i}]", root)
+    if "uniqueItems" in schema and not isinstance(schema["uniqueItems"], bool):
+        raise SchemaError(f"{path}: uniqueItems must be true or false")
     if "additionalProperties" in schema and schema["additionalProperties"] not in (True, False):
-        check_schema(schema["additionalProperties"], f"{path}.*")
-    if "anyOf" in schema:
-        if not isinstance(schema["anyOf"], list) or not schema["anyOf"]:
-            raise SchemaError(f"{path}: anyOf must be a non-empty list")
-        for i, sub in enumerate(schema["anyOf"]):
-            check_schema(sub, f"{path}.anyOf[{i}]")
+        check_schema(schema["additionalProperties"], f"{path}.*", root)
+    for key in ("anyOf", "oneOf", "allOf"):
+        if key in schema:
+            if not isinstance(schema[key], list) or not schema[key]:
+                raise SchemaError(f"{path}: {key} must be a non-empty list")
+            for i, sub in enumerate(schema[key]):
+                check_schema(sub, f"{path}.{key}[{i}]", root)
+    if "$ref" in schema:
+        resolve_ref(root, schema["$ref"], path)
     if "pattern" in schema:
         try:
             re.compile(schema["pattern"])
@@ -101,15 +135,30 @@ def _matches_type(value: Any, name: str) -> bool:
 def validate(value: Any, schema: Any) -> list[str]:
     """Return a list of human-readable errors (empty means valid). Raises SchemaError for a bad schema."""
     check_schema(schema)
-    return _validate(value, schema, "$")
+    return _validate(value, schema, "$", schema, 0)
 
 
-def _validate(value: Any, schema: Any, path: str) -> list[str]:
+def _canonical(value: Any) -> str:
+    """A string that is equal for equal JSON values (1 and 1.0 are the same number; 1 and true are not)."""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, list):
+        return "[" + ",".join(_canonical(v) for v in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ",".join(f"{json.dumps(k)}:{_canonical(v)}" for k, v in sorted(value.items())) + "}"
+    return json.dumps(value)
+
+
+def _validate(value: Any, schema: Any, path: str, root: Any, depth: int) -> list[str]:
+    if depth > MAX_REF_DEPTH:
+        raise SchemaError(f"{path}: schema references nest too deeply (a $ref cycle?)")
     if schema is True:
         return []
     if schema is False:
         return [f"{path}: no value is allowed here"]
     errors: list[str] = []
+    if "$ref" in schema:
+        errors += _validate(value, resolve_ref(root, schema["$ref"], path), path, root, depth + 1)
     declared = schema.get("type")
     if declared is not None:
         names = declared if isinstance(declared, list) else [declared]
@@ -119,8 +168,14 @@ def _validate(value: Any, schema: Any, path: str) -> list[str]:
         errors.append(f"{path}: must equal {schema['const']!r}")
     if "enum" in schema and not any(v == value and json_type(v) == json_type(value) for v in schema["enum"]):
         errors.append(f"{path}: must be one of {schema['enum']!r}, got {value!r}")
-    if "anyOf" in schema and not any(not _validate(value, sub, path) for sub in schema["anyOf"]):
+    if "anyOf" in schema and not any(not _validate(value, sub, path, root, depth + 1) for sub in schema["anyOf"]):
         errors.append(f"{path}: does not match any of the {len(schema['anyOf'])} allowed shapes")
+    if "oneOf" in schema:
+        matching = sum(1 for sub in schema["oneOf"] if not _validate(value, sub, path, root, depth + 1))
+        if matching != 1:
+            errors.append(f"{path}: matches {matching} of the {len(schema['oneOf'])} allowed shapes, needs exactly one")
+    for sub in schema.get("allOf", []):
+        errors += _validate(value, sub, path, root, depth + 1)
     if isinstance(value, str):
         if "minLength" in schema and len(value) < schema["minLength"]:
             errors.append(f"{path}: shorter than {schema['minLength']} characters")
@@ -138,9 +193,20 @@ def _validate(value: Any, schema: Any, path: str) -> list[str]:
             errors.append(f"{path}: has {len(value)} items, needs at least {schema['minItems']}")
         if "maxItems" in schema and len(value) > schema["maxItems"]:
             errors.append(f"{path}: has {len(value)} items, allows at most {schema['maxItems']}")
+        prefix = schema.get("prefixItems", [])
+        for i, item in enumerate(value[: len(prefix)]):
+            errors += _validate(item, prefix[i], f"{path}[{i}]", root, depth + 1)
         if "items" in schema:
             for i, item in enumerate(value):
-                errors += _validate(item, schema["items"], f"{path}[{i}]")
+                if i >= len(prefix):
+                    errors += _validate(item, schema["items"], f"{path}[{i}]", root, depth + 1)
+        if schema.get("uniqueItems"):
+            seen: set[str] = set()
+            for i, item in enumerate(value):
+                key = _canonical(item)
+                if key in seen:
+                    errors.append(f"{path}[{i}]: duplicate of an earlier item")
+                seen.add(key)
     if isinstance(value, dict):
         for name in schema.get("required", []):
             if name not in value:
@@ -148,7 +214,7 @@ def _validate(value: Any, schema: Any, path: str) -> list[str]:
         properties = schema.get("properties", {})
         for name, sub in properties.items():
             if name in value:
-                errors += _validate(value[name], sub, f"{path}.{name}")
+                errors += _validate(value[name], sub, f"{path}.{name}", root, depth + 1)
         extra = schema.get("additionalProperties", True)
         for name in value:
             if name in properties:
@@ -156,5 +222,5 @@ def _validate(value: Any, schema: Any, path: str) -> list[str]:
             if extra is False:
                 errors.append(f"{path}: unexpected field {name!r}")
             elif extra is not True:
-                errors += _validate(value[name], extra, f"{path}.{name}")
+                errors += _validate(value[name], extra, f"{path}.{name}", root, depth + 1)
     return errors

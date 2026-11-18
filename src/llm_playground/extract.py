@@ -1,20 +1,25 @@
 """Structured extraction: ask for JSON that matches a schema, validate it, and ask again with the errors if it does not.
 
-This is the portable approach (prompt, parse, validate, repair) and works with any provider. Providers also offer
-native modes (forced tool calls, JSON mode); those are not implemented here. Validation proves the *shape* is right,
-not that the values are true: a model can return a perfectly valid object with a wrong date.
+Two modes: the portable one (prompt, parse, validate, repair), which works with any provider, and ``native=True``,
+which forces a tool call whose arguments are the data (Anthropic ``tool_choice`` / OpenAI ``tool_choice``) so the
+reply is JSON by construction; the result is still validated, because providers do not guarantee every constraint.
+
+Validation proves the *shape* is right, not that the values are true: a model can return a perfectly valid object
+with a wrong date. Pass ``checks`` (functions that return a list of problems) for value-level rules, for example
+``llm_playground.checks.grounded_in_text`` to require that extracted names and numbers actually appear in the source.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from llm_playground.client import Chat
 from llm_playground.schema import check_schema, validate
-from llm_playground.types import Usage
+from llm_playground.types import ToolSpec, Usage
 
 MAX_ERRORS_SHOWN = 10
 _FENCE = re.compile(r"```(?:json|JSON)?\s*\n?(.*?)```", re.DOTALL)
@@ -94,29 +99,51 @@ def repair_prompt(errors: list[str], truncated: bool) -> str:
     )  # fmt: skip
 
 
+Check = Callable[[Any], list[str]]
+
+
+def native_prompt(text: str, instruction: str, tool_name: str) -> str:
+    return f"{instruction}\n\nCall the {tool_name} tool with the extracted data.\n\nText:\n{text}"
+
+
 def extract_structured(
     chat: Chat,
     text: str,
     schema: Any,
     instruction: str = "Extract the requested information from the text below.",
     max_repairs: int = 2,
+    native: bool = False,
+    checks: Sequence[Check] = (),
+    tool_name: str = "record_data",
 ) -> StructuredResult:
     """Extract data from ``text`` as JSON matching ``schema``, asking the model to fix invalid replies.
 
     Makes up to ``1 + max_repairs`` calls, each repair continuing the same conversation with the errors listed.
-    Raises ``SchemaError`` for a bad schema before any call, and ``StructuredOutputError`` if no reply validates.
+    ``native=True`` forces a tool call (the schema must describe an object); ``checks`` run after the schema passes and
+    their problems go back to the model like schema errors. Raises ``SchemaError`` for a bad schema before any call,
+    and ``StructuredOutputError`` if no reply passes.
     """
     check_schema(schema)
+    tool: ToolSpec | None = None
+    if native:
+        if not isinstance(schema, dict) or schema.get("type") != "object":
+            raise ValueError("native tool mode needs a schema with type 'object'; wrap an array in an object")
+        tool = ToolSpec(tool_name, "Record the extracted data.", schema)
     before = chat.usage
-    prompt = build_prompt(text, schema, instruction)
+    prompt = native_prompt(text, instruction, tool_name) if native else build_prompt(text, schema, instruction)
     rejected: list[list[str]] = []
     raw = ""
     for attempt in range(1, max_repairs + 2):
-        raw = chat.send(prompt).text
+        reply = chat.send(prompt, tool=tool)
+        raw = reply.text if reply.text.strip() else json.dumps(reply.tool_input)
         errors: list[str]
+        data: Any = None
         try:
-            data = extract_json(raw)
+            data = reply.tool_input if reply.tool_input is not None else extract_json(reply.text)
             errors = validate(data, schema)
+            for check in checks:
+                if not errors:
+                    errors = check(data)
         except ExtractionError as err:
             errors = [f"could not read JSON: {err}"]
         if not errors:

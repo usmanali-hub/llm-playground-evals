@@ -50,6 +50,11 @@ def anthropic_body(request: ChatRequest, stream: bool) -> dict[str, Any]:
         body["system"] = request.system
     if request.temperature is not None:
         body["temperature"] = request.temperature
+    if request.tool:
+        body["tools"] = [
+            {"name": request.tool.name, "description": request.tool.description, "input_schema": request.tool.schema}
+        ]
+        body["tool_choice"] = {"type": "tool", "name": request.tool.name}
     if stream:
         body["stream"] = True
     return body
@@ -59,11 +64,13 @@ def parse_anthropic_response(data: dict[str, Any]) -> ChatResult:
     blocks = data.get("content") or []
     text = "".join(b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text")
     usage = data.get("usage") or {}
+    tool_input = next((b.get("input") for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use"), None)
     return ChatResult(
         text=text,
         usage=Usage(_int(usage.get("input_tokens")), _int(usage.get("output_tokens"))),
         stop_reason=data.get("stop_reason"),
         model=str(data.get("model", "")),
+        tool_input=tool_input,
     )
 
 
@@ -113,6 +120,8 @@ class AnthropicProvider:
         )
 
     def stream(self, request: ChatRequest) -> Iterator[StreamEvent]:
+        if request.tool:
+            raise ProviderError("streaming a forced tool call is not supported; use complete()")
         lines = self._transport.post_stream(self._url, self._headers, anthropic_body(request, True))
         yield from anthropic_events(lines)
 
@@ -130,6 +139,14 @@ def openai_body(request: ChatRequest, stream: bool) -> dict[str, Any]:
     body: dict[str, Any] = {"model": request.model, "max_tokens": request.max_tokens, "messages": messages}
     if request.temperature is not None:
         body["temperature"] = request.temperature
+    if request.tool:
+        function = {
+            "name": request.tool.name,
+            "description": request.tool.description,
+            "parameters": request.tool.schema,
+        }
+        body["tools"] = [{"type": "function", "function": function}]
+        body["tool_choice"] = {"type": "function", "function": {"name": request.tool.name}}
     if stream:
         body["stream"] = True
         body["stream_options"] = {"include_usage": True}
@@ -140,11 +157,22 @@ def parse_openai_response(data: dict[str, Any]) -> ChatResult:
     choices = data.get("choices") or []
     first = choices[0] if choices else {}
     usage = data.get("usage") or {}
+    message = first.get("message") or {}
+    text = str(message.get("content") or "")
+    tool_input: Any = None
+    calls = message.get("tool_calls") or []
+    if calls:
+        arguments = str((calls[0].get("function") or {}).get("arguments") or "")
+        try:
+            tool_input = json.loads(arguments)
+        except json.JSONDecodeError:
+            text = arguments  # keep the raw text so the caller can still try to read or repair it
     return ChatResult(
-        text=str((first.get("message") or {}).get("content") or ""),
+        text=text,
         usage=Usage(_int(usage.get("prompt_tokens")), _int(usage.get("completion_tokens"))),
         stop_reason=first.get("finish_reason"),
         model=str(data.get("model", "")),
+        tool_input=tool_input,
     )
 
 
@@ -193,6 +221,8 @@ class OpenAICompatProvider:
         return parse_openai_response(self._transport.post_json(self._url, self._headers, openai_body(request, False)))
 
     def stream(self, request: ChatRequest) -> Iterator[StreamEvent]:
+        if request.tool:
+            raise ProviderError("streaming a forced tool call is not supported; use complete()")
         lines = self._transport.post_stream(self._url, self._headers, openai_body(request, True))
         yield from openai_events(lines)
 
@@ -240,6 +270,11 @@ class FakeProvider:
     def complete(self, request: ChatRequest) -> ChatResult:
         self.requests.append(request)
         text = self._reply(request)
+        if request.tool:  # imitate a native tool call: arguments that parse as JSON arrive as ``tool_input``
+            try:
+                return ChatResult("", self._usage(request, text), "tool_use", "fake", tool_input=json.loads(text))
+            except json.JSONDecodeError:
+                pass
         return ChatResult(text, self._usage(request, text), "end_turn", "fake")
 
     def stream(self, request: ChatRequest) -> Iterator[StreamEvent]:

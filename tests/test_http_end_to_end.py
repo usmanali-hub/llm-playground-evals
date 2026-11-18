@@ -128,3 +128,21 @@ def test_an_unreachable_server_is_a_retryable_provider_error() -> None:
     with pytest.raises(ProviderError) as info:
         provider.complete(REQUEST)
     assert info.value.retryable and KEY not in str(info.value)
+
+
+def test_forced_tool_call_round_trips_over_http(server: str) -> None:
+    from llm_playground import ToolSpec
+
+    tool = ToolSpec("record", "Record it.", {"type": "object", "properties": {"n": {"type": "integer"}}})
+    reply = {
+        "model": "m",
+        "content": [{"type": "tool_use", "name": "record", "input": {"n": 7}}],
+        "usage": {"input_tokens": 3, "output_tokens": 2},
+        "stop_reason": "tool_use",
+    }
+    Handler.script = [(200, {"content-type": "application/json"}, json.dumps(reply).encode())]
+    request = ChatRequest("m", (Message("user", "hi"),), tool=tool)
+    result = AnthropicProvider(api_key=KEY, url=server).complete(request)
+    assert result.tool_input == {"n": 7}
+    body = Handler.seen[0]["body"]
+    assert body["tool_choice"] == {"type": "tool", "name": "record"} and body["tools"][0]["name"] == "record"

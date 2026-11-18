@@ -48,11 +48,18 @@ corrected JSON, up to `max_repairs` times. A reply cut off at the token limit ge
 counts every attempt, so repairs show up in the cost.
 
 * The validator (`schema.py`) implements a documented subset of JSON Schema and **raises on any keyword it does not
-  implement** (`oneOf`, `$ref`, ...) instead of silently ignoring a constraint.
+  implement** instead of silently ignoring a constraint. It supports `oneOf`, `allOf`, local `$ref`/`$defs` (cycles are
+  detected), `prefixItems` and `uniqueItems` besides the basics. Not supported (and refused): remote `$ref`, `not`,
+  `if/then/else`, `format`, `patternProperties`, `dependentRequired`.
 * Validation proves the *shape* is right, not that the values are true: a model can return a valid object with the wrong
-  total. Check values that matter separately.
-* This is the portable prompt-parse-validate-repair loop. Provider-native modes (forced tool calls, JSON mode) are not
-  implemented here and would reduce how often repairs are needed.
+  total. Pass `checks` for value rules: `grounded_in_text(source, paths)` requires extracted strings and numbers to
+  appear in the source text (it cannot tell whether a value that is present sits in the right field), and
+  `totals_match(...)` compares line items with a total. Their problems go back to the model like schema errors
+  (`--ground PATH` on the CLI).
+* `native=True` (`--native`) forces a tool call whose arguments are the data, for Anthropic and OpenAI-compatible
+  request shapes; the object schema must have `type: object`. The result is still validated and repaired. Streaming a
+  forced tool call is refused. The request and response shapes are tested against recorded-shape payloads and a
+  localhost server, not a live provider.
 * `examples/repair_demo.py` uses hand-written replies that look like common mistakes. It shows how the harness reacts;
   it says nothing about how often a real model makes them.
 
@@ -85,7 +92,7 @@ flowchart LR
 
 ## What is and is not verified
 
-* 96 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 136 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
   extraction and repair, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.

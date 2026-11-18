@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 Role = Literal["user", "assistant"]
 
@@ -46,12 +46,22 @@ class Usage:
 
 
 @dataclass(frozen=True)
+class ToolSpec:
+    """A function the model is forced to call; its arguments are the structured output (``schema`` is a JSON Schema)."""
+
+    name: str
+    description: str
+    schema: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class ChatRequest:
     model: str
     messages: tuple[Message, ...]
     system: str | None = None
     max_tokens: int = 1024
     temperature: float | None = None
+    tool: ToolSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +70,7 @@ class ChatResult:
     usage: Usage
     stop_reason: str | None
     model: str
+    tool_input: Any = None  # the arguments of a forced tool call, already parsed, when the request had a tool
 
 
 @dataclass(frozen=True)

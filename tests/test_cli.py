@@ -47,3 +47,18 @@ def test_extract_needs_a_schema_and_reports_failure_cleanly(capsys: pytest.Captu
     assert "no valid output after 2 attempts" in capsys.readouterr().err
     assert main(["extract", "x", "--schema", str(tmp_path / "missing.json")]) == 1
     assert "error:" in capsys.readouterr().err
+
+
+def test_extract_native_with_grounding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from llm_playground import FakeProvider, scripted_reply
+    from llm_playground import __main__ as cli
+
+    schema = tmp_path / "s.json"
+    schema.write_text('{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}')
+    provider = FakeProvider(reply=scripted_reply(['{"name": "Zed"}', '{"name": "Aisha"}']))
+    monkeypatch.setattr(cli, "build_provider", lambda name, url: provider)
+    code = main(["extract", "Aisha lives here", "--schema", str(schema), "--native", "--ground", "name"])
+    assert code == 0 and "attempts: 2" in capsys.readouterr().out
+    assert provider.requests[0].tool is not None
