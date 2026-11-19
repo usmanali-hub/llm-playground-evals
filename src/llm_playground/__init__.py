@@ -13,6 +13,7 @@ from llm_playground.pricing import Pricing
 from llm_playground.providers import AnthropicProvider, FakeProvider, OpenAICompatProvider, scripted_reply
 from llm_playground.retry import RetryingProvider
 from llm_playground.schema import SchemaError, validate
+from llm_playground.tracking import Turn, UsageTracker, percentile
 from llm_playground.types import ChatRequest, ChatResult, Message, ProviderError, StreamEvent, ToolSpec, Usage
 
 __all__ = [
@@ -31,11 +32,14 @@ __all__ = [
     "StreamEvent",
     "StructuredOutputError",
     "StructuredResult",
+    "Turn",
     "ToolSpec",
+    "UsageTracker",
     "Usage",
     "extract_json",
     "extract_structured",
     "grounded_in_text",
+    "percentile",
     "scripted_reply",
     "totals_match",
     "validate",

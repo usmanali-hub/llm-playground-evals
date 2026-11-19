@@ -62,3 +62,11 @@ def test_extract_native_with_grounding(
     code = main(["extract", "Aisha lives here", "--schema", str(schema), "--native", "--ground", "name"])
     assert code == 0 and "attempts: 2" in capsys.readouterr().out
     assert provider.requests[0].tool is not None
+
+
+def test_track_flag_prints_a_latency_and_throughput_summary(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["chat", "hello", "--track"]) == 0
+    out = capsys.readouterr().out
+    assert "latency p50=" in out and "output tokens/sec" in out
+    main(["chat", "hello", "--track", "--stream"])
+    assert "time to first token" in capsys.readouterr().out

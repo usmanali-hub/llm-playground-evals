@@ -38,6 +38,18 @@ reports correct count, replies that could not be parsed, and output tokens.
   model whose answers were chosen in advance, so its table is **not evidence about any real model**. Judging a pattern
   needs a real model, many cases and repeated runs.
 
+## Tokens, cost and latency tracking
+
+`tracking.py`'s `UsageTracker` wraps `Chat.send`/`Chat.stream` (`track_send`/`track_stream`) and records, per call,
+token usage, cost (if you pass `Pricing`), wall-clock latency, and for streaming calls the time to the first piece.
+`--track` on the CLI prints a summary: totals, cost, p50/p95/max latency, aggregate output tokens/sec, and mean
+time-to-first-token across any streamed calls.
+
+* Percentiles use a plain stdlib nearest-rank calculation (`percentile`), not numpy.
+* Latency is wall-clock time around the actual provider call. Against `FakeProvider` (`examples/tracking_demo.py`)
+  that measures Python/dataclass overhead, not a model's speed; a real latency or throughput number needs a real
+  provider and many calls, not three offline ones.
+
 ## Structured output: JSON that matches a schema
 
 ```python
@@ -105,7 +117,7 @@ flowchart LR
 
 ## What is and is not verified
 
-* 148 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 162 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
   extraction and repair, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.
@@ -117,7 +129,7 @@ flowchart LR
   until you run it with a real key.
 * Token counts from the offline fake are estimates (about 4 characters per token). Real providers report exact counts,
   which is what `Usage` records.
-* Not built yet: prompt caching, async batching, and measured local-model serving.
+* Not built yet: prompt caching, async batching, and measured local-model serving (with real weights).
 
 ## Layout
 

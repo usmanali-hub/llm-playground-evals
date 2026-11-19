@@ -14,6 +14,7 @@ from llm_playground.pricing import Pricing
 from llm_playground.providers import AnthropicProvider, FakeProvider, OpenAICompatProvider, Provider
 from llm_playground.retry import RetryingProvider
 from llm_playground.schema import SchemaError
+from llm_playground.tracking import UsageTracker
 from llm_playground.types import ProviderError
 
 OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
@@ -57,6 +58,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--price-in", type=float, help="your price per million input tokens")
     parser.add_argument("--price-out", type=float, help="your price per million output tokens")
+    parser.add_argument("--track", action="store_true", help="print latency and throughput alongside usage")
     args = parser.parse_args(argv)
 
     if args.command == "extract" and not args.schema:
@@ -66,6 +68,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if (args.price_in is None) != (args.price_out is None):
         parser.error("give both --price-in and --price-out, or neither")
     pricing = Pricing(args.price_in, args.price_out) if args.price_in is not None else None
+    tracker = UsageTracker(pricing=pricing) if args.track else None
     try:
         chat = Chat(
             RetryingProvider(build_provider(args.provider, args.url), max_attempts=args.retries + 1),
@@ -85,11 +88,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(found.data, indent=2, ensure_ascii=False))
             print(f"attempts: {found.attempts} (1 means the first reply was already valid)")
         elif args.stream:
-            for piece in chat.stream(args.prompt):
+            pieces = tracker.track_stream(chat, args.prompt) if tracker else chat.stream(args.prompt)
+            for piece in pieces:
                 print(piece, end="", flush=True)
             print()
         else:
-            print(chat.send(args.prompt).text)
+            if tracker:
+                print(tracker.track_send(chat, args.prompt).text)
+            else:
+                print(chat.send(args.prompt).text)
     except (ProviderError, StructuredOutputError, SchemaError, OSError, json.JSONDecodeError) as err:
         print(f"error: {err}", file=sys.stderr)
         return 1
@@ -99,6 +106,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.provider == "fake":
         line += " (estimated by the offline fake, about 4 characters per token)"
     print(line)
+    if tracker:
+        print(tracker.summary())
     return 0
 
 
