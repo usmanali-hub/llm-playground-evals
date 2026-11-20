@@ -59,6 +59,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--price-in", type=float, help="your price per million input tokens")
     parser.add_argument("--price-out", type=float, help="your price per million output tokens")
     parser.add_argument("--track", action="store_true", help="print latency and throughput alongside usage")
+    parser.add_argument(
+        "--cache-system", action="store_true", help="mark the system prompt (and tool schema) as cacheable (Anthropic)"
+    )
     args = parser.parse_args(argv)
 
     if args.command == "extract" and not args.schema:
@@ -77,6 +80,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_tokens=args.max_tokens,
             temperature=args.temperature,
             pricing=pricing,
+            cache_system=args.cache_system,
         )
         if args.command == "extract":
             with open(args.schema, encoding="utf-8") as handle:

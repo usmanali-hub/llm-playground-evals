@@ -24,3 +24,4 @@ jobs:
       - run: python examples/repair_demo.py
       - run: python examples/patterns_demo.py
       - run: python examples/tracking_demo.py
+      - run: python examples/caching_demo.py

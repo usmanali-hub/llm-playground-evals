@@ -50,6 +50,24 @@ time-to-first-token across any streamed calls.
   that measures Python/dataclass overhead, not a model's speed; a real latency or throughput number needs a real
   provider and many calls, not three offline ones.
 
+## Prompt caching (Anthropic)
+
+`--cache-system` (or `Chat(..., cache_system=True)`) marks the system prompt, and any forced tool's schema, as a
+cache breakpoint (`cache_control: {"type": "ephemeral"}`) in the Anthropic request body. `Usage` separately reports
+`cache_write_tokens` and `cache_read_tokens` from the response (`cache_creation_input_tokens` /
+`cache_read_input_tokens`); both are already counted once in `input_tokens`. `Pricing` accepts
+`cache_write_per_mtok` / `cache_read_per_mtok` to re-price just that portion (a cache write usually costs more than
+a plain input token, a cache read much less); leaving them unset prices cached tokens as plain input, which is a
+safe but pessimistic default.
+
+* Only useful when the same system prompt (and tool) is reused across calls — a one-off prompt gains nothing from a
+  breakpoint, and a short system prompt rarely clears the provider's minimum cacheable size.
+* OpenAI-compatible endpoints cache automatically server-side with no request change; there is nothing to set here,
+  and the response usage would need a different field (`prompt_tokens_details.cached_tokens`) to report it, which
+  is not wired up yet.
+* `examples/caching_demo.py` shows the request shape and a pricing comparison with made-up usage numbers; no cache
+  was actually written or read, because that requires a live Anthropic account.
+
 ## Structured output: JSON that matches a schema
 
 ```python
@@ -117,7 +135,7 @@ flowchart LR
 
 ## What is and is not verified
 
-* 162 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 171 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
   extraction and repair, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.

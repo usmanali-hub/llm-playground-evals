@@ -32,13 +32,25 @@ class Message:
 
 @dataclass(frozen=True)
 class Usage:
-    """Token counts as reported by the provider (not estimated, except by the offline fake)."""
+    """Token counts as reported by the provider (not estimated, except by the offline fake).
+
+    ``cache_write_tokens`` and ``cache_read_tokens`` are reported separately only by providers that support prompt
+    caching (currently Anthropic). A cache write usually costs more than a plain input token and a cache read much
+    less; both are already counted once in ``input_tokens``, so adding them in again would double-count.
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_write_tokens: int = 0
+    cache_read_tokens: int = 0
 
     def __add__(self, other: Usage) -> Usage:
-        return Usage(self.input_tokens + other.input_tokens, self.output_tokens + other.output_tokens)
+        return Usage(
+            self.input_tokens + other.input_tokens,
+            self.output_tokens + other.output_tokens,
+            self.cache_write_tokens + other.cache_write_tokens,
+            self.cache_read_tokens + other.cache_read_tokens,
+        )
 
     @property
     def total(self) -> int:
@@ -62,6 +74,7 @@ class ChatRequest:
     max_tokens: int = 1024
     temperature: float | None = None
     tool: ToolSpec | None = None
+    cache_system: bool = False  # mark the system prompt (and tool schema, if any) as a cache breakpoint
 
 
 @dataclass(frozen=True)

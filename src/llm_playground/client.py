@@ -19,6 +19,7 @@ class Chat:
         max_tokens: int = 1024,
         temperature: float | None = None,
         pricing: Pricing | None = None,
+        cache_system: bool = False,
     ) -> None:
         self.provider = provider
         self.model = model
@@ -26,6 +27,7 @@ class Chat:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.pricing = pricing
+        self.cache_system = cache_system
         self.history: list[Message] = []
         self.usage = Usage()
         self.last_result: ChatResult | None = None
@@ -34,7 +36,9 @@ class Chat:
         if not text.strip():
             raise ValueError("message is empty")
         messages = (*self.history, Message("user", text))
-        return ChatRequest(self.model, messages, self.system, self.max_tokens, self.temperature, tool)
+        return ChatRequest(
+            self.model, messages, self.system, self.max_tokens, self.temperature, tool, self.cache_system
+        )
 
     def _commit(self, text: str, result: ChatResult) -> None:
         # History only grows with complete user/assistant pairs, so roles keep alternating after a failure.

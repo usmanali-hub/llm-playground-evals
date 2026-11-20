@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from llm_playground.providers import (
@@ -184,3 +186,46 @@ def test_streaming_a_forced_tool_call_is_refused(cls: type) -> None:
     provider = cls(api_key="k" * 12, transport=FakeTransport())
     with pytest.raises(ProviderError, match="streaming a forced tool call"):
         list(provider.stream(TOOL_REQUEST))
+
+
+def test_cache_system_marks_the_system_block_and_tool_as_ephemeral() -> None:
+    cached = ChatRequest("m", (Message("user", "hi"),), system="Be brief.", tool=TOOL, cache_system=True)
+    body = anthropic_body(cached, stream=False)
+    assert body["system"] == [{"type": "text", "text": "Be brief.", "cache_control": {"type": "ephemeral"}}]
+    assert body["tools"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_without_cache_system_the_system_prompt_stays_a_plain_string() -> None:
+    body = anthropic_body(REQUEST, stream=False)
+    assert body["system"] == "Be brief."
+
+
+def test_anthropic_complete_reports_cache_write_and_read_tokens() -> None:
+    reply = {
+        "content": [{"type": "text", "text": "hi"}],
+        "usage": {
+            "input_tokens": 50,
+            "output_tokens": 5,
+            "cache_creation_input_tokens": 40,
+            "cache_read_input_tokens": 0,
+        },
+        "stop_reason": "end_turn",
+    }
+    result = AnthropicProvider(api_key="sk-test-key-12345", transport=FakeTransport(json_reply=reply)).complete(REQUEST)
+    assert result.usage == Usage(50, 5, 40, 0)
+
+
+def test_anthropic_stream_carries_cache_tokens_through_usage_event() -> None:
+    start = {"type": "message_start", "message": {"usage": {"input_tokens": 5, "cache_read_input_tokens": 45}}}
+    delta = {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}}
+    stop = {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 2}}
+    lines = [
+        f"event: message_start\ndata: {json.dumps(start)}\n\n",
+        f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n",
+        f"event: message_delta\ndata: {json.dumps(stop)}\n\n",
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ]
+    transport = FakeTransport(stream_lines=lines)
+    events = list(AnthropicProvider(api_key="sk-test-key-12345", transport=transport).stream(REQUEST))
+    usage_event = next(e for e in events if e.kind == "usage")
+    assert usage_event.usage == Usage(5, 2, 0, 45)

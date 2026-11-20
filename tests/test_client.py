@@ -77,3 +77,32 @@ def test_empty_message_and_empty_reply_are_rejected() -> None:
 def test_negative_prices_are_rejected() -> None:
     with pytest.raises(ValueError):
         Pricing(-1.0, 1.0)
+
+
+def test_cache_tokens_default_to_the_plain_input_price() -> None:
+    pricing = Pricing(input_per_mtok=3.0, output_per_mtok=15.0)
+    usage = Usage(input_tokens=100, output_tokens=10, cache_write_tokens=40, cache_read_tokens=20)
+    assert pricing.cost(usage) == pytest.approx((100 * 3.0 + 10 * 15.0) / 1_000_000)
+
+
+def test_cache_prices_reprice_just_the_cache_portion() -> None:
+    pricing = Pricing(input_per_mtok=3.0, output_per_mtok=15.0, cache_write_per_mtok=3.75, cache_read_per_mtok=0.3)
+    # 100 input tokens total: 40 were a cache write, 20 a cache read, the remaining 40 plain input
+    usage = Usage(input_tokens=100, output_tokens=10, cache_write_tokens=40, cache_read_tokens=20)
+    expected = (40 * 3.0 + 40 * 3.75 + 20 * 0.3 + 10 * 15.0) / 1_000_000
+    assert pricing.cost(usage) == pytest.approx(expected)
+
+
+def test_negative_cache_prices_are_rejected() -> None:
+    with pytest.raises(ValueError):
+        Pricing(1.0, 1.0, cache_write_per_mtok=-1.0)
+    with pytest.raises(ValueError):
+        Pricing(1.0, 1.0, cache_read_per_mtok=-1.0)
+
+
+def test_cache_system_flows_into_the_request_sent_to_the_provider() -> None:
+    provider = FakeProvider()
+    chat = Chat(provider, "fake", system="Be brief.", cache_system=True)
+    chat.send("hi")
+    assert provider.requests[0].cache_system is True
+    assert Chat(provider, "fake").cache_system is False

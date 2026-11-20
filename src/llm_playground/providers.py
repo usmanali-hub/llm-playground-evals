@@ -47,13 +47,22 @@ def anthropic_body(request: ChatRequest, stream: bool) -> dict[str, Any]:
         "messages": [{"role": m.role, "content": m.content} for m in request.messages],
     }
     if request.system:
-        body["system"] = request.system
+        if request.cache_system:
+            # A content-block list lets one block carry cache_control; a plain string cannot.
+            body["system"] = [{"type": "text", "text": request.system, "cache_control": {"type": "ephemeral"}}]
+        else:
+            body["system"] = request.system
     if request.temperature is not None:
         body["temperature"] = request.temperature
     if request.tool:
-        body["tools"] = [
-            {"name": request.tool.name, "description": request.tool.description, "input_schema": request.tool.schema}
-        ]
+        tool_def: dict[str, Any] = {
+            "name": request.tool.name,
+            "description": request.tool.description,
+            "input_schema": request.tool.schema,
+        }
+        if request.cache_system:
+            tool_def["cache_control"] = {"type": "ephemeral"}
+        body["tools"] = [tool_def]
         body["tool_choice"] = {"type": "tool", "name": request.tool.name}
     if stream:
         body["stream"] = True
@@ -67,7 +76,12 @@ def parse_anthropic_response(data: dict[str, Any]) -> ChatResult:
     tool_input = next((b.get("input") for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use"), None)
     return ChatResult(
         text=text,
-        usage=Usage(_int(usage.get("input_tokens")), _int(usage.get("output_tokens"))),
+        usage=Usage(
+            _int(usage.get("input_tokens")),
+            _int(usage.get("output_tokens")),
+            _int(usage.get("cache_creation_input_tokens")),
+            _int(usage.get("cache_read_input_tokens")),
+        ),
         stop_reason=data.get("stop_reason"),
         model=str(data.get("model", "")),
         tool_input=tool_input,
@@ -76,7 +90,7 @@ def parse_anthropic_response(data: dict[str, Any]) -> ChatResult:
 
 def anthropic_events(lines: Iterable[str]) -> Iterator[StreamEvent]:
     """Turn the Messages API event stream into text, usage and stop events; raise if it ends early or errors."""
-    input_tokens = output_tokens = 0
+    input_tokens = output_tokens = cache_write = cache_read = 0
     stop_reason: str | None = None
     for event, data in parse_sse(lines):
         payload = _load(data)
@@ -88,7 +102,10 @@ def anthropic_events(lines: Iterable[str]) -> Iterator[StreamEvent]:
                 retryable=kind in {"overloaded_error", "rate_limit_error", "api_error"},
             )
         if event == "message_start":
-            input_tokens = _int(((payload.get("message") or {}).get("usage") or {}).get("input_tokens"))
+            start_usage = (payload.get("message") or {}).get("usage") or {}
+            input_tokens = _int(start_usage.get("input_tokens"))
+            cache_write = _int(start_usage.get("cache_creation_input_tokens"))
+            cache_read = _int(start_usage.get("cache_read_input_tokens"))
         elif event == "content_block_delta":
             delta = payload.get("delta") or {}
             if delta.get("type") == "text_delta" and delta.get("text"):
@@ -97,7 +114,7 @@ def anthropic_events(lines: Iterable[str]) -> Iterator[StreamEvent]:
             output_tokens = _int((payload.get("usage") or {}).get("output_tokens"))
             stop_reason = (payload.get("delta") or {}).get("stop_reason") or stop_reason
         elif event == "message_stop":
-            yield StreamEvent("usage", usage=Usage(input_tokens, output_tokens))
+            yield StreamEvent("usage", usage=Usage(input_tokens, output_tokens, cache_write, cache_read))
             yield StreamEvent("stop", stop_reason=stop_reason)
             return
     raise ProviderError("stream ended before message_stop (connection dropped?)", retryable=True)

@@ -70,3 +70,8 @@ def test_track_flag_prints_a_latency_and_throughput_summary(capsys: pytest.Captu
     assert "latency p50=" in out and "output tokens/sec" in out
     main(["chat", "hello", "--track", "--stream"])
     assert "time to first token" in capsys.readouterr().out
+
+
+def test_cache_system_flag_parses_and_runs(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["chat", "hello", "--system", "Be brief.", "--cache-system"]) == 0
+    assert "You said: hello" in capsys.readouterr().out
