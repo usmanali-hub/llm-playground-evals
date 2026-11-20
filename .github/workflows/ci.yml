@@ -25,3 +25,4 @@ jobs:
       - run: python examples/patterns_demo.py
       - run: python examples/tracking_demo.py
       - run: python examples/caching_demo.py
+      - run: python examples/batch_and_pydantic_demo.py

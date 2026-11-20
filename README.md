@@ -68,6 +68,26 @@ safe but pessimistic default.
 * `examples/caching_demo.py` shows the request shape and a pricing comparison with made-up usage numbers; no cache
   was actually written or read, because that requires a live Anthropic account.
 
+## Concurrent batching
+
+`batch.py`'s `run_batch`/`run_batch_sync` send many prompts through `asyncio`, bounded by a `concurrency` limit;
+since every provider here is a blocking `urllib` call, concurrency comes from `asyncio.to_thread` (a worker-thread
+pool), which still overlaps real network waiting time. Each prompt gets its own `Chat` from a `chat_factory`, so
+histories never mix, and a failing call returns a `BatchItem` with its exception instead of stopping the batch; a
+test asserts concurrency is actually bounded (peak concurrent calls tracked with a counter), not just "looks async".
+
+## Pydantic-validated extraction
+
+`pydantic_models.py`'s `extract_model(chat, text, Model)` derives the JSON Schema from `Model.model_json_schema()`
+(this repo's validator already understands the shapes Pydantic emits: `$defs`/`$ref`, `anyOf` for `Optional`,
+numeric bounds) and adds a Pydantic-level check after it, so a `@field_validator` or cross-field rule the schema
+subset cannot express still sends a repair prompt instead of crashing. It is optional (`pip install ".[pydantic]"`)
+and kept out of the stdlib-only core; import it directly rather than through the package's top-level `__init__`.
+
+* **Known gap**: `Field(gt=...)`/`Field(lt=...)` (and a few other Pydantic/JSON-Schema keywords not in this
+  validator's supported set) produce a schema `check_schema` refuses outright, before any model call — use `ge`/`le`
+  instead, or validate that part only at the Pydantic level.
+
 ## Structured output: JSON that matches a schema
 
 ```python
@@ -135,7 +155,7 @@ flowchart LR
 
 ## What is and is not verified
 
-* 171 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 184 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
   extraction and repair, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.
@@ -147,7 +167,7 @@ flowchart LR
   until you run it with a real key.
 * Token counts from the offline fake are estimates (about 4 characters per token). Real providers report exact counts,
   which is what `Usage` records.
-* Not built yet: prompt caching, async batching, and measured local-model serving (with real weights).
+* Not built yet: measured local-model serving (vLLM/Ollama/llama.cpp with real weights — unavailable in this sandbox).
 
 ## Layout
 
