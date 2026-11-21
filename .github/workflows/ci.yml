@@ -26,3 +26,4 @@ jobs:
       - run: python examples/tracking_demo.py
       - run: python examples/caching_demo.py
       - run: python examples/batch_and_pydantic_demo.py
+      - run: python examples/tool_calling_demo.py

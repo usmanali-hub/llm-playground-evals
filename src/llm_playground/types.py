@@ -67,14 +67,28 @@ class ToolSpec:
 
 
 @dataclass(frozen=True)
+class ToolCall:
+    """One function the model asked to invoke, with an id so its result can be matched back to this call."""
+
+    id: str
+    name: str
+    arguments: Any
+
+
+@dataclass(frozen=True)
 class ChatRequest:
     model: str
     messages: tuple[Message, ...]
     system: str | None = None
     max_tokens: int = 1024
     temperature: float | None = None
-    tool: ToolSpec | None = None
+    tool: ToolSpec | None = None  # a single tool the model is FORCED to call (used by extract_structured's native mode)
+    tools: tuple[ToolSpec, ...] = ()  # several tools the model may freely choose among (or call none)
     cache_system: bool = False  # mark the system prompt (and tool schema, if any) as a cache breakpoint
+
+    def __post_init__(self) -> None:
+        if self.tool is not None and self.tools:
+            raise ValueError("pass either `tool` (forced) or `tools` (free choice), not both")
 
 
 @dataclass(frozen=True)
@@ -84,6 +98,7 @@ class ChatResult:
     stop_reason: str | None
     model: str
     tool_input: Any = None  # the arguments of a forced tool call, already parsed, when the request had a tool
+    tool_calls: tuple[ToolCall, ...] = ()  # the tools the model chose to call, when the request offered `tools`
 
 
 @dataclass(frozen=True)

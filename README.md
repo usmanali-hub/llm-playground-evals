@@ -25,6 +25,23 @@ python -m llm_playground chat --provider anthropic --model <model-name> --system
 server (Ollama by default at `localhost:11434`, or any vLLM / llama.cpp server via `--url`) and needs no key.
 Model names and prices are never built in: they change, so you pass the ones you use.
 
+## Function/tool calling: a model choosing among several tools
+
+`ToolSpec`s can now be offered as a free choice (`Chat.send(prompt, tools=(spec_a, spec_b))`, `tool_choice="auto"`
+for both providers) instead of only the single forced tool `extract_structured`'s native mode uses. `tools.py`
+wraps that into the usual pattern: a `ToolRegistry` of Python callables keyed by name, `run_agent_step(chat,
+registry, prompt)` sends the prompt with every registered tool on offer, dispatches the one the model picks (if
+any), and sends the result back as the conversation's next turn.
+
+* **Scope, stated plainly**: a tool's result is fed back as an ordinary text turn (`"The X tool returned: ..."`),
+  not the structured, id-matched tool-result message a real API expects; and `run_agent_step` only acts on the
+  model's first tool call, though `ChatResult.tool_calls` can hold several (a model calling more than one tool in a
+  turn is not handled). Both are the natural next layer, not built here.
+* A tool that raises is caught (`ToolError`) and its message is sent back to the model as the "result", the same
+  shape a real failed function call would take, instead of crashing the loop.
+* `examples/tool_calling_demo.py` is a scripted fake that always picks the same tool for a weather question; it
+  shows the registry/dispatch/follow-up plumbing, not any model's judgement about when a tool is needed.
+
 ## Prompt patterns: zero-shot, few-shot, chain of thought
 
 `prompts.py` has pure builders (`zero_shot_prompt`, `few_shot_prompt`, `cot_prompt`), answer parsers
@@ -155,7 +172,7 @@ flowchart LR
 
 ## What is and is not verified
 
-* 184 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 193 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
   extraction and repair, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.

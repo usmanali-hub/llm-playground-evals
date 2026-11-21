@@ -184,7 +184,7 @@ def test_openai_non_json_arguments_come_back_as_text() -> None:
 @pytest.mark.parametrize("cls", [AnthropicProvider, OpenAICompatProvider])
 def test_streaming_a_forced_tool_call_is_refused(cls: type) -> None:
     provider = cls(api_key="k" * 12, transport=FakeTransport())
-    with pytest.raises(ProviderError, match="streaming a forced tool call"):
+    with pytest.raises(ProviderError, match="streaming a tool-calling request"):
         list(provider.stream(TOOL_REQUEST))
 
 

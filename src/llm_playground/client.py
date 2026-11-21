@@ -32,30 +32,41 @@ class Chat:
         self.usage = Usage()
         self.last_result: ChatResult | None = None
 
-    def _request(self, text: str, tool: ToolSpec | None = None) -> ChatRequest:
+    def _request(self, text: str, tool: ToolSpec | None = None, tools: tuple[ToolSpec, ...] = ()) -> ChatRequest:
         if not text.strip():
             raise ValueError("message is empty")
         messages = (*self.history, Message("user", text))
         return ChatRequest(
-            self.model, messages, self.system, self.max_tokens, self.temperature, tool, self.cache_system
+            self.model,
+            messages,
+            self.system,
+            self.max_tokens,
+            self.temperature,
+            tool,
+            tools,
+            cache_system=self.cache_system,
         )
 
     def _commit(self, text: str, result: ChatResult) -> None:
         # History only grows with complete user/assistant pairs, so roles keep alternating after a failure.
-        # A forced tool call has no text; its arguments are kept in the history as JSON text so roles stay plain.
-        reply = (
-            result.text
-            if result.text.strip()
-            else (json.dumps(result.tool_input) if result.tool_input is not None else "")
-        )
+        # A forced tool call has no text; its arguments (or a freely-chosen tool call) are kept in the history as
+        # JSON text so roles stay plain, even though that is not the structured shape a real API would send back.
+        if result.text.strip():
+            reply = result.text
+        elif result.tool_input is not None:
+            reply = json.dumps(result.tool_input)
+        elif result.tool_calls:
+            reply = json.dumps([{"name": c.name, "arguments": c.arguments} for c in result.tool_calls])
+        else:
+            reply = ""
         if not reply.strip():
             raise ProviderError("the model returned an empty reply")
         self.history += [Message("user", text), Message("assistant", reply)]
         self.usage += result.usage
         self.last_result = result
 
-    def send(self, text: str, tool: ToolSpec | None = None) -> ChatResult:
-        result = self.provider.complete(self._request(text, tool))
+    def send(self, text: str, tool: ToolSpec | None = None, tools: tuple[ToolSpec, ...] = ()) -> ChatResult:
+        result = self.provider.complete(self._request(text, tool, tools))
         self._commit(text, result)
         return result
 

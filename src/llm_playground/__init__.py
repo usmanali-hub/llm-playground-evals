@@ -13,10 +13,12 @@ from llm_playground.pricing import Pricing
 from llm_playground.providers import AnthropicProvider, FakeProvider, OpenAICompatProvider, scripted_reply
 from llm_playground.retry import RetryingProvider
 from llm_playground.schema import SchemaError, validate
+from llm_playground.tools import AgentStep, Tool, ToolError, ToolRegistry, run_agent_step
 from llm_playground.tracking import Turn, UsageTracker, percentile
-from llm_playground.types import ChatRequest, ChatResult, Message, ProviderError, StreamEvent, ToolSpec, Usage
+from llm_playground.types import ChatRequest, ChatResult, Message, ProviderError, StreamEvent, ToolCall, ToolSpec, Usage
 
 __all__ = [
+    "AgentStep",
     "AnthropicProvider",
     "Chat",
     "ChatRequest",
@@ -29,6 +31,10 @@ __all__ = [
     "ProviderError",
     "RetryingProvider",
     "SchemaError",
+    "Tool",
+    "ToolCall",
+    "ToolError",
+    "ToolRegistry",
     "StreamEvent",
     "StructuredOutputError",
     "StructuredResult",
@@ -39,6 +45,7 @@ __all__ = [
     "extract_json",
     "extract_structured",
     "grounded_in_text",
+    "run_agent_step",
     "percentile",
     "scripted_reply",
     "totals_match",

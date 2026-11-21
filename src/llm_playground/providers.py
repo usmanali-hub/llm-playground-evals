@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 from llm_playground.sse import parse_sse
 from llm_playground.transport import Transport, UrllibTransport
-from llm_playground.types import ChatRequest, ChatResult, ProviderError, StreamEvent, Usage
+from llm_playground.types import ChatRequest, ChatResult, ProviderError, StreamEvent, ToolCall, Usage
 
 
 class Provider(Protocol):
@@ -64,6 +64,12 @@ def anthropic_body(request: ChatRequest, stream: bool) -> dict[str, Any]:
             tool_def["cache_control"] = {"type": "ephemeral"}
         body["tools"] = [tool_def]
         body["tool_choice"] = {"type": "tool", "name": request.tool.name}
+    elif request.tools:
+        defs = [{"name": t.name, "description": t.description, "input_schema": t.schema} for t in request.tools]
+        if request.cache_system:
+            defs[-1]["cache_control"] = {"type": "ephemeral"}
+        body["tools"] = defs
+        body["tool_choice"] = {"type": "auto"}
     if stream:
         body["stream"] = True
     return body
@@ -74,6 +80,11 @@ def parse_anthropic_response(data: dict[str, Any]) -> ChatResult:
     text = "".join(b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text")
     usage = data.get("usage") or {}
     tool_input = next((b.get("input") for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use"), None)
+    tool_calls = tuple(
+        ToolCall(str(b.get("id", "")), str(b.get("name", "")), b.get("input"))
+        for b in blocks
+        if isinstance(b, dict) and b.get("type") == "tool_use"
+    )
     return ChatResult(
         text=text,
         usage=Usage(
@@ -85,6 +96,7 @@ def parse_anthropic_response(data: dict[str, Any]) -> ChatResult:
         stop_reason=data.get("stop_reason"),
         model=str(data.get("model", "")),
         tool_input=tool_input,
+        tool_calls=tool_calls,
     )
 
 
@@ -137,8 +149,8 @@ class AnthropicProvider:
         )
 
     def stream(self, request: ChatRequest) -> Iterator[StreamEvent]:
-        if request.tool:
-            raise ProviderError("streaming a forced tool call is not supported; use complete()")
+        if request.tool or request.tools:
+            raise ProviderError("streaming a tool-calling request is not supported; use complete()")
         lines = self._transport.post_stream(self._url, self._headers, anthropic_body(request, True))
         yield from anthropic_events(lines)
 
@@ -164,6 +176,12 @@ def openai_body(request: ChatRequest, stream: bool) -> dict[str, Any]:
         }
         body["tools"] = [{"type": "function", "function": function}]
         body["tool_choice"] = {"type": "function", "function": {"name": request.tool.name}}
+    elif request.tools:
+        body["tools"] = [
+            {"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.schema}}
+            for t in request.tools
+        ]
+        body["tool_choice"] = "auto"
     if stream:
         body["stream"] = True
         body["stream_options"] = {"include_usage": True}
@@ -178,18 +196,29 @@ def parse_openai_response(data: dict[str, Any]) -> ChatResult:
     text = str(message.get("content") or "")
     tool_input: Any = None
     calls = message.get("tool_calls") or []
+    tool_calls: tuple[ToolCall, ...] = ()
     if calls:
         arguments = str((calls[0].get("function") or {}).get("arguments") or "")
         try:
             tool_input = json.loads(arguments)
         except json.JSONDecodeError:
             text = arguments  # keep the raw text so the caller can still try to read or repair it
+        parsed_calls = []
+        for call in calls:
+            function = call.get("function") or {}
+            try:
+                arguments_value = json.loads(str(function.get("arguments") or ""))
+            except json.JSONDecodeError:
+                arguments_value = None
+            parsed_calls.append(ToolCall(str(call.get("id", "")), str(function.get("name", "")), arguments_value))
+        tool_calls = tuple(parsed_calls)
     return ChatResult(
         text=text,
         usage=Usage(_int(usage.get("prompt_tokens")), _int(usage.get("completion_tokens"))),
         stop_reason=first.get("finish_reason"),
         model=str(data.get("model", "")),
         tool_input=tool_input,
+        tool_calls=tool_calls,
     )
 
 
@@ -238,8 +267,8 @@ class OpenAICompatProvider:
         return parse_openai_response(self._transport.post_json(self._url, self._headers, openai_body(request, False)))
 
     def stream(self, request: ChatRequest) -> Iterator[StreamEvent]:
-        if request.tool:
-            raise ProviderError("streaming a forced tool call is not supported; use complete()")
+        if request.tool or request.tools:
+            raise ProviderError("streaming a tool-calling request is not supported; use complete()")
         lines = self._transport.post_stream(self._url, self._headers, openai_body(request, True))
         yield from openai_events(lines)
 
@@ -290,6 +319,16 @@ class FakeProvider:
         if request.tool:  # imitate a native tool call: arguments that parse as JSON arrive as ``tool_input``
             try:
                 return ChatResult("", self._usage(request, text), "tool_use", "fake", tool_input=json.loads(text))
+            except json.JSONDecodeError:
+                pass
+        if request.tools:
+            # A reply of {"call": "<tool name>", "arguments": {...}} picks a tool, like "auto" tool_choice would;
+            # any other reply (including one that fails to parse) means the fake chose not to call anything.
+            try:
+                chosen = json.loads(text)
+                if isinstance(chosen, dict) and chosen.get("call") in {t.name for t in request.tools}:
+                    call = ToolCall("call_1", str(chosen["call"]), chosen.get("arguments"))
+                    return ChatResult("", self._usage(request, text), "tool_use", "fake", tool_calls=(call,))
             except json.JSONDecodeError:
                 pass
         return ChatResult(text, self._usage(request, text), "end_turn", "fake")
