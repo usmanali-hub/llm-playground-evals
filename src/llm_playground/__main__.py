@@ -9,6 +9,8 @@ from collections.abc import Sequence
 
 from llm_playground.checks import grounded_in_text
 from llm_playground.client import Chat
+from llm_playground.eval_cases import CASES
+from llm_playground.evals import run_suite
 from llm_playground.extract import StructuredOutputError, extract_structured
 from llm_playground.pricing import Pricing
 from llm_playground.providers import AnthropicProvider, FakeProvider, OpenAICompatProvider, Provider
@@ -32,8 +34,13 @@ def build_provider(name: str, url: str | None) -> Provider:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="llm_playground", description=__doc__)
-    parser.add_argument("command", choices=["chat", "extract"])
-    parser.add_argument("prompt", help="the message to send (chat) or the text to extract from (extract)")
+    parser.add_argument("command", choices=["chat", "extract", "eval"])
+    parser.add_argument(
+        "prompt",
+        nargs="?",
+        default="",
+        help="the message to send (chat) or the text to extract from (extract); unused by eval",
+    )
     parser.add_argument("--provider", choices=["fake", "anthropic", "openai", "local"], default="fake")
     parser.add_argument("--model", help="model name; required for every provider except fake")
     parser.add_argument("--system", help="system prompt")
@@ -66,6 +73,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "extract" and not args.schema:
         parser.error("extract needs --schema")
+    if args.command == "eval":
+        report = run_suite(CASES)
+        print(report.summary())
+        return 0 if not report.failed_results else 1
     if args.provider != "fake" and not args.model:
         parser.error("--model is required unless --provider fake")
     if (args.price_in is None) != (args.price_out is None):

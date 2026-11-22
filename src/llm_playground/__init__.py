@@ -2,6 +2,7 @@
 
 from llm_playground.checks import grounded_in_text, totals_match
 from llm_playground.client import Chat
+from llm_playground.evals import EvalCase, EvalReport, EvalResult, run_case, run_suite
 from llm_playground.extract import (
     ExtractionError,
     StructuredOutputError,
@@ -24,6 +25,9 @@ __all__ = [
     "Chat",
     "ChatRequest",
     "ChatResult",
+    "EvalCase",
+    "EvalReport",
+    "EvalResult",
     "ExtractionError",
     "FakeProvider",
     "Message",
@@ -51,6 +55,8 @@ __all__ = [
     "grounded_in_text",
     "parse_prompt_file",
     "run_agent_step",
+    "run_case",
+    "run_suite",
     "percentile",
     "scripted_reply",
     "totals_match",

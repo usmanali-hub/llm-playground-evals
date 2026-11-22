@@ -162,6 +162,24 @@ counts every attempt, so repairs show up in the cost.
 * `examples/repair_demo.py` uses hand-written replies that look like common mistakes. It shows how the harness reacts;
   it says nothing about how often a real model makes them.
 
+## Eval sets
+
+`llm_playground.evals` runs named `EvalCase`s — a source text, a JSON Schema, and a scripted "model" reply — through
+`extract_structured` and checks whether the outcome (valid data, or a rejection) matched what the case expected.
+`python -m llm_playground eval` runs the 30 cases in `llm_playground.eval_cases` and prints a pass/fail report; they
+cover basic schema shapes (objects, arrays, enums, `oneOf`/`allOf`, local `$ref`, tuples, `uniqueItems`), the
+repair loop (one and two rounds, native tool-call mode repairing a bad value), the value-level checks
+(`grounded_in_text` catching a fabricated field and `totals_match` catching a bad sum, both then repaired), and
+cases that are *supposed* to end in failure — exhausted repairs on garbage, a persistent schema violation, a check
+that never passes — to prove the pipeline actually rejects bad output instead of waving it through.
+
+* **Scope, stated plainly**: every reply in the suite is a hand-written string played back by `FakeProvider`, not a
+  live model's output. This is a regression suite for the extraction pipeline and the prompts that drive it — schema
+  validation, the repair loop, the value-level checks, native tool mode — not a benchmark of how well any real model
+  follows instructions. The same `EvalCase.schema` and `checks` would make a genuine model eval if run against
+  `AnthropicProvider`/`OpenAICompatProvider` instead of the scripted replies; that swap needs a live provider key,
+  which this sandbox does not have.
+
 ## How it is put together
 
 ```mermaid
@@ -191,9 +209,9 @@ flowchart LR
 
 ## What is and is not verified
 
-* 216 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 224 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
-  extraction and repair, and the CLI. CI runs
+  extraction and repair, the eval harness and its 30-case suite, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.
 * **HTTP tests use a real server on localhost.** `tests/test_http_end_to_end.py` sends the actual urllib requests to a local
   server that replays recorded-shape payloads, so the request headers and body, status handling, `Retry-After`, streaming
