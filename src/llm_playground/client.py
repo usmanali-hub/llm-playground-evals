@@ -49,14 +49,19 @@ class Chat:
 
     def _commit(self, text: str, result: ChatResult) -> None:
         # History only grows with complete user/assistant pairs, so roles keep alternating after a failure.
-        # A forced tool call has no text; its arguments (or a freely-chosen tool call) are kept in the history as
-        # JSON text so roles stay plain, even though that is not the structured shape a real API would send back.
+        # A freely-chosen tool call (ChatResult.tool_calls) is kept as a proper assistant message carrying
+        # tool_calls, matching the structured shape a real API expects, so send_tool_result can thread a
+        # correctly id-matched result back to it. A forced tool call (the native-extraction `tool` field) has no
+        # id to match against, so its arguments are still kept as JSON text, same as before.
+        if result.tool_calls:
+            self.history += [Message("user", text), Message("assistant", result.text, tool_calls=result.tool_calls)]
+            self.usage += result.usage
+            self.last_result = result
+            return
         if result.text.strip():
             reply = result.text
         elif result.tool_input is not None:
             reply = json.dumps(result.tool_input)
-        elif result.tool_calls:
-            reply = json.dumps([{"name": c.name, "arguments": c.arguments} for c in result.tool_calls])
         else:
             reply = ""
         if not reply.strip():
@@ -68,6 +73,33 @@ class Chat:
     def send(self, text: str, tool: ToolSpec | None = None, tools: tuple[ToolSpec, ...] = ()) -> ChatResult:
         result = self.provider.complete(self._request(text, tool, tools))
         self._commit(text, result)
+        return result
+
+    def send_tool_result(self, tool_call_id: str, content: str) -> ChatResult:
+        """Continue the conversation after a tool call, with its result threaded as a structured, id-matched
+        message (the shape a real API expects), not a plain next user turn.
+
+        Must follow a `send(..., tools=...)` call whose result had `tool_calls`; that call's assistant message
+        (carrying the matching `tool_calls`) must still be the last thing in history. No new tools are offered on
+        this follow-up call, so the model's reply here is always plain text, never another tool call.
+        """
+        if not self.history or self.history[-1].role != "assistant" or not self.history[-1].tool_calls:
+            raise ValueError("send_tool_result must follow a send(...) call whose result had tool_calls")
+        self.history.append(Message("tool", content, tool_call_id=tool_call_id))
+        request = ChatRequest(
+            self.model,
+            tuple(self.history),
+            self.system,
+            self.max_tokens,
+            self.temperature,
+            cache_system=self.cache_system,
+        )
+        result = self.provider.complete(request)
+        if not result.text.strip():
+            raise ProviderError("the model returned an empty reply")
+        self.history.append(Message("assistant", result.text))
+        self.usage += result.usage
+        self.last_result = result
         return result
 
     def stream(self, text: str) -> Generator[str, None, None]:

@@ -40,11 +40,26 @@ ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 
 
+def _anthropic_message(m: Any) -> dict[str, Any]:
+    if m.role == "tool":
+        return {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": m.tool_call_id, "content": m.content}],
+        }
+    if m.tool_calls:
+        blocks: list[dict[str, Any]] = []
+        if m.content:
+            blocks.append({"type": "text", "text": m.content})
+        blocks.extend({"type": "tool_use", "id": c.id, "name": c.name, "input": c.arguments} for c in m.tool_calls)
+        return {"role": m.role, "content": blocks}
+    return {"role": m.role, "content": m.content}
+
+
 def anthropic_body(request: ChatRequest, stream: bool) -> dict[str, Any]:
     body: dict[str, Any] = {
         "model": request.model,
         "max_tokens": request.max_tokens,
-        "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+        "messages": [_anthropic_message(m) for m in request.messages],
     }
     if request.system:
         if request.cache_system:
@@ -160,11 +175,26 @@ class AnthropicProvider:
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
 
+def _openai_message(m: Any) -> dict[str, Any]:
+    if m.role == "tool":
+        return {"role": "tool", "tool_call_id": m.tool_call_id, "content": m.content}
+    if m.tool_calls:
+        return {
+            "role": "assistant",
+            "content": m.content or None,
+            "tool_calls": [
+                {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": json.dumps(c.arguments)}}
+                for c in m.tool_calls
+            ],
+        }
+    return {"role": m.role, "content": m.content}
+
+
 def openai_body(request: ChatRequest, stream: bool) -> dict[str, Any]:
-    messages: list[dict[str, str]] = []
+    messages: list[dict[str, Any]] = []
     if request.system:
         messages.append({"role": "system", "content": request.system})
-    messages.extend({"role": m.role, "content": m.content} for m in request.messages)
+    messages.extend(_openai_message(m) for m in request.messages)
     body: dict[str, Any] = {"model": request.model, "max_tokens": request.max_tokens, "messages": messages}
     if request.temperature is not None:
         body["temperature"] = request.temperature

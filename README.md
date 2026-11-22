@@ -48,12 +48,14 @@ the template and raises `PromptError` naming exactly which variables are missing
 for both providers) instead of only the single forced tool `extract_structured`'s native mode uses. `tools.py`
 wraps that into the usual pattern: a `ToolRegistry` of Python callables keyed by name, `run_agent_step(chat,
 registry, prompt)` sends the prompt with every registered tool on offer, dispatches the one the model picks (if
-any), and sends the result back as the conversation's next turn.
+any), and threads its result back with `Chat.send_tool_result(call.id, content)` — a structured, id-matched
+message (an Anthropic `tool_result` content block, or an OpenAI `role: "tool"` message with `tool_call_id`), the
+same shape a real API expects back, not a plain next user turn standing in for it.
 
-* **Scope, stated plainly**: a tool's result is fed back as an ordinary text turn (`"The X tool returned: ..."`),
-  not the structured, id-matched tool-result message a real API expects; and `run_agent_step` only acts on the
-  model's first tool call, though `ChatResult.tool_calls` can hold several (a model calling more than one tool in a
-  turn is not handled). Both are the natural next layer, not built here.
+* **Scope, stated plainly**: `run_agent_step` only acts on the model's first tool call, though `ChatResult.tool_calls`
+  can hold several (a model calling more than one tool in the same turn is not handled), and the follow-up call
+  offers no tools, so the model cannot chain a second call off the first within one `run_agent_step`. Both are the
+  natural next layer, not built here.
 * A tool that raises is caught (`ToolError`) and its message is sent back to the model as the "result", the same
   shape a real failed function call would take, instead of crashing the loop.
 * `examples/tool_calling_demo.py` is a scripted fake that always picks the same tool for a weather question; it
@@ -189,7 +191,7 @@ flowchart LR
 
 ## What is and is not verified
 
-* 210 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 216 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
   extraction and repair, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.

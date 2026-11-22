@@ -229,3 +229,57 @@ def test_anthropic_stream_carries_cache_tokens_through_usage_event() -> None:
     events = list(AnthropicProvider(api_key="sk-test-key-12345", transport=transport).stream(REQUEST))
     usage_event = next(e for e in events if e.kind == "usage")
     assert usage_event.usage == Usage(5, 2, 0, 45)
+
+
+def test_anthropic_message_serializes_tool_call_and_tool_result_messages() -> None:
+    from llm_playground.types import ToolCall
+
+    call = ToolCall("call_1", "get_weather", {"city": "Kuwait City"})
+    messages = (
+        Message("user", "what's the weather?"),
+        Message("assistant", "", tool_calls=(call,)),
+        Message("tool", "sunny", tool_call_id="call_1"),
+    )
+    body = anthropic_body(ChatRequest("m", messages), stream=False)
+    assert body["messages"][1] == {
+        "role": "assistant",
+        "content": [{"type": "tool_use", "id": "call_1", "name": "get_weather", "input": {"city": "Kuwait City"}}],
+    }
+    assert body["messages"][2] == {
+        "role": "user",
+        "content": [{"type": "tool_result", "tool_use_id": "call_1", "content": "sunny"}],
+    }
+
+
+def test_anthropic_message_keeps_assistant_text_alongside_a_tool_call() -> None:
+    from llm_playground.types import ToolCall
+
+    call = ToolCall("call_1", "get_weather", {"city": "X"})
+    message = Message("assistant", "Let me check.", tool_calls=(call,))
+    body = anthropic_body(ChatRequest("m", (message,)), stream=False)
+    assert body["messages"][0]["content"][0] == {"type": "text", "text": "Let me check."}
+    assert body["messages"][0]["content"][1]["type"] == "tool_use"
+
+
+def test_openai_message_serializes_tool_call_and_tool_result_messages() -> None:
+    from llm_playground.types import ToolCall
+
+    call = ToolCall("call_1", "get_weather", {"city": "Kuwait City"})
+    messages = (
+        Message("user", "what's the weather?"),
+        Message("assistant", "", tool_calls=(call,)),
+        Message("tool", "sunny", tool_call_id="call_1"),
+    )
+    body = openai_body(ChatRequest("m", messages), stream=False)
+    assert body["messages"][1] == {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "get_weather", "arguments": '{"city": "Kuwait City"}'},
+            }
+        ],
+    }
+    assert body["messages"][2] == {"role": "tool", "tool_call_id": "call_1", "content": "sunny"}

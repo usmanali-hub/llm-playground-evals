@@ -106,3 +106,42 @@ def test_cache_system_flows_into_the_request_sent_to_the_provider() -> None:
     chat.send("hi")
     assert provider.requests[0].cache_system is True
     assert Chat(provider, "fake").cache_system is False
+
+
+def test_send_tool_result_threads_a_structured_id_matched_message() -> None:
+    import json
+
+    from llm_playground.types import ToolSpec
+
+    spec = ToolSpec("get_weather", "desc", {"type": "object", "properties": {"city": {}}})
+
+    def reply(request):  # type: ignore[no-untyped-def]
+        if request.tools:
+            return json.dumps({"call": "get_weather", "arguments": {"city": "X"}})
+        return "It's sunny."
+
+    chat = Chat(FakeProvider(reply=reply), "fake")
+    first = chat.send("weather?", tools=(spec,))
+    call = first.tool_calls[0]
+    assert chat.history[-1].role == "assistant" and chat.history[-1].tool_calls == (call,)
+
+    follow_up = chat.send_tool_result(call.id, "sunny")
+    assert follow_up.text == "It's sunny."
+    assert chat.history[-2] == Message("tool", "sunny", tool_call_id=call.id)
+    assert chat.history[-1] == Message("assistant", "It's sunny.")
+
+
+def test_send_tool_result_requires_a_preceding_tool_call() -> None:
+    chat = Chat(FakeProvider(), "fake")
+    with pytest.raises(ValueError, match="must follow a send"):
+        chat.send_tool_result("call_1", "result")
+    chat.send("just a normal message")  # an ordinary turn, no tool_calls
+    with pytest.raises(ValueError, match="must follow a send"):
+        chat.send_tool_result("call_1", "result")
+
+
+def test_message_role_tool_requires_tool_call_id_and_vice_versa() -> None:
+    with pytest.raises(ValueError, match="must carry tool_call_id"):
+        Message("tool", "x")
+    with pytest.raises(ValueError, match="only valid on a 'tool' role"):
+        Message("user", "x", tool_call_id="call_1")

@@ -1,12 +1,12 @@
 """Function calling: let the model choose among several tools, run the one it picked, and continue the conversation
-with the result.
+with the result as a structured, id-matched tool message (`Chat.send_tool_result`) — the same message shape a real
+Anthropic/OpenAI call expects back, not a plain next user turn standing in for it.
 
 Scope, stated plainly: this sends the tools with ``tool_choice="auto"`` (the model may call one, or answer in
-plain text instead), dispatches the single call it returns through a `ToolRegistry`, and feeds the result back as an
-ordinary next turn of `Chat` (``chat.send(f"The {name} tool returned: ...")``). What it does NOT do: thread a
-structured, id-matched tool-result message the way the real Anthropic/OpenAI APIs expect (a dedicated content block
-tied to the call's id), or handle a model that calls more than one tool in the same turn — `ChatResult.tool_calls`
-can hold several, but `run_agent_step` only acts on the first. Those are the natural next layer, not built here.
+plain text instead) and dispatches the single call it returns through a `ToolRegistry`. What it does NOT do: handle
+a model that calls more than one tool in the same turn — `ChatResult.tool_calls` can hold several, but
+`run_agent_step` only acts on the first — or run more than one tool round (the follow-up call offers no tools, so
+the model cannot chain a second call off the first). Both are the natural next layer, not built here.
 """
 
 from __future__ import annotations
@@ -72,16 +72,17 @@ class AgentStep:
 
 def run_agent_step(chat: Chat, registry: ToolRegistry, prompt: str) -> AgentStep:
     """Send ``prompt`` with every tool in ``registry`` on offer; if the model calls one, run it and send the model
-    the result as the next turn. A tool that raises does not stop the loop: its error is reported to the model as
-    the "result", the same as a real API's failed function call would be, and also returned on `AgentStep`."""
+    the result through `Chat.send_tool_result`, a structured message tied to that call's id. A tool that raises
+    does not stop the loop: its error is reported to the model as the "result", the same as a real API's failed
+    function call would be, and also returned on `AgentStep`."""
     reply = chat.send(prompt, tools=registry.specs)
     if not reply.tool_calls:
         return AgentStep(reply, called=None)
     call = reply.tool_calls[0]
     try:
         result = registry.dispatch(call)
-        follow_up = chat.send(f"The {call.name} tool returned: {result!r}")
+        follow_up = chat.send_tool_result(call.id, repr(result))
         return AgentStep(reply, called=call, tool_result=result, follow_up=follow_up)
     except ToolError as err:
-        follow_up = chat.send(f"The {call.name} tool failed: {err}")
+        follow_up = chat.send_tool_result(call.id, f"error: {err}")
         return AgentStep(reply, called=call, tool_error=str(err), follow_up=follow_up)

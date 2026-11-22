@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-Role = Literal["user", "assistant"]
+Role = Literal["user", "assistant", "tool"]
 
 
 class ProviderError(RuntimeError):
@@ -26,8 +26,24 @@ class ProviderError(RuntimeError):
 
 @dataclass(frozen=True)
 class Message:
+    """A turn in the conversation. Most messages are plain (role "user" or "assistant", just `content`).
+
+    Two more shapes exist to thread a tool call through, matching the structured, id-matched messages a real API
+    expects rather than flattening everything to text: an assistant message that called one or more tools carries
+    `tool_calls` (and may also have `content` text alongside them); a "tool" role message is that call's result,
+    identified by `tool_call_id` (one of the calling message's `tool_calls[i].id`).
+    """
+
     role: Role
-    content: str
+    content: str = ""
+    tool_calls: tuple[ToolCall, ...] = ()  # set on an assistant message that invoked one or more tools
+    tool_call_id: str | None = None  # set on a "tool" role message: which call this is the result of
+
+    def __post_init__(self) -> None:
+        if self.role == "tool" and self.tool_call_id is None:
+            raise ValueError("a 'tool' role message must carry tool_call_id")
+        if self.tool_call_id is not None and self.role != "tool":
+            raise ValueError("tool_call_id is only valid on a 'tool' role message")
 
 
 @dataclass(frozen=True)
