@@ -1,0 +1,8 @@
+---
+description: Summary with an explicit tone and length cap, added after v1 produced inconsistent lengths
+variables: text, tone, max_words
+---
+Summarize the following text in a {{tone}} tone, in no more than {{max_words}} words.
+
+Text:
+{{text}}

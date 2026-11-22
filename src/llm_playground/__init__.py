@@ -10,6 +10,7 @@ from llm_playground.extract import (
     extract_structured,
 )
 from llm_playground.pricing import Pricing
+from llm_playground.promptfile import PromptError, PromptLibrary, PromptVersion, parse_prompt_file
 from llm_playground.providers import AnthropicProvider, FakeProvider, OpenAICompatProvider, scripted_reply
 from llm_playground.retry import RetryingProvider
 from llm_playground.schema import SchemaError, validate
@@ -28,6 +29,9 @@ __all__ = [
     "Message",
     "OpenAICompatProvider",
     "Pricing",
+    "PromptError",
+    "PromptLibrary",
+    "PromptVersion",
     "ProviderError",
     "RetryingProvider",
     "SchemaError",
@@ -45,6 +49,7 @@ __all__ = [
     "extract_json",
     "extract_structured",
     "grounded_in_text",
+    "parse_prompt_file",
     "run_agent_step",
     "percentile",
     "scripted_reply",

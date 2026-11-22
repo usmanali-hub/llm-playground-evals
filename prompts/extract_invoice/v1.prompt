@@ -1,0 +1,8 @@
+---
+description: Extraction instruction for the invoice schema in examples/invoice_schema.json
+variables: text
+---
+Extract the vendor, line items and total from the invoice text below as JSON matching the given schema.
+
+Invoice:
+{{text}}

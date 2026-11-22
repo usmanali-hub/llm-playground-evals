@@ -1,0 +1,8 @@
+---
+description: Plain summary request
+variables: text
+---
+Summarize the following text in two sentences.
+
+Text:
+{{text}}

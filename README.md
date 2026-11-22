@@ -25,6 +25,23 @@ python -m llm_playground chat --provider anthropic --model <model-name> --system
 server (Ollama by default at `localhost:11434`, or any vLLM / llama.cpp server via `--url`) and needs no key.
 Model names and prices are never built in: they change, so you pass the ones you use.
 
+## Prompt versioning in files
+
+Prompts live as files under `prompts/<name>/v<N>.prompt` instead of strings embedded in code: a small frontmatter
+block (`description`, `variables`) plus a body that references each variable as `{{var}}`. `PromptLibrary.load(dir)`
+discovers every version of every prompt, `library.get(name)` returns the highest version number (numerically, so
+`v10` beats `v2`), and `library.get(name, version=1)` pins an older one. `PromptVersion.render(**values)` fills in
+the template and raises `PromptError` naming exactly which variables are missing or weren't declared.
+
+* A new version is a new file (`v2.prompt`), not an edit to `v1.prompt` — nothing is overwritten, so a caller that
+  pinned `version=1` keeps working, and the file itself (its `description`) records *why* a new version exists
+  (see `prompts/summarize/v2.prompt`: added after v1 produced inconsistent lengths).
+* This only parses and renders files. Pairing a rendered prompt with `Chat`/`extract_structured` and recording which
+  name/version was used for a given call (a natural fit with `UsageTracker`) is left to the caller.
+* `prompt.unused_variables()` / `prompt.undeclared_placeholders()` catch a frontmatter/body mismatch (a declared
+  variable the body never uses, or a `{{typo}}` the frontmatter never declared) without raising, since a template
+  author may want to check these without attempting a render.
+
 ## Function/tool calling: a model choosing among several tools
 
 `ToolSpec`s can now be offered as a free choice (`Chat.send(prompt, tools=(spec_a, spec_b))`, `tool_choice="auto"`
@@ -172,7 +189,7 @@ flowchart LR
 
 ## What is and is not verified
 
-* 193 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 210 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
   extraction and repair, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.
