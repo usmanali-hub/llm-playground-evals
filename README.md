@@ -168,6 +168,29 @@ counts every attempt, so repairs show up in the cost.
 * `examples/repair_demo.py` uses hand-written replies that look like common mistakes. It shows how the harness reacts;
   it says nothing about how often a real model makes them.
 
+## Output guardrails with a repair loop
+
+`llm_playground.guardrails` checks a reply against plain-text rules — `max_length`/`min_length`, `no_banned_terms`,
+`no_pii_patterns` (email/phone/credit-card-shaped), `must_match` (require a pattern instead of forbidding one) — and
+`guarded_send(chat, prompt, guardrails, max_retries=2)` re-prompts the model with the violations listed when a
+reply fails any of them, the same repair-loop shape `extract_structured` uses for schema errors, applied to free
+text instead of JSON. It raises `GuardrailError` if no attempt ever passes.
+
+```bash
+python examples/guardrails_demo.py
+# accepted after 2 attempt(s): ...through the in-app contact form for help.
+# rejected reply's violations: ['reply appears to contain an email address']
+```
+
+* **Scope, stated plainly**: every guardrail here is a regex/length/keyword heuristic, the same class of check as
+  `llm_playground.checks`'s `grounded_in_text`/`totals_match` applied to free text — not a safety classifier.
+  `no_pii_patterns` catches a shape, not an identity (it cannot tell a real SSN from a made-up example number in
+  the same shape, and misses PII in a shape it doesn't recognize), and `no_banned_terms` is a literal substring
+  match a paraphrase slips past. Passing every guardrail here is not a claim that a reply is actually safe.
+* This complements `RetryingProvider` (below), not replaces it: that retries a *failed call* (overload, rate limit,
+  dropped connection); `guarded_send` retries a *reply the provider returned successfully* that failed a content
+  check.
+
 ## Eval sets
 
 `llm_playground.evals` runs named `EvalCase`s — a source text, a JSON Schema, and a scripted "model" reply — through
@@ -229,7 +252,7 @@ flowchart LR
 
 ## What is and is not verified
 
-* 239 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 250 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
   extraction and repair, the eval harness and its 30-case suite, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.

@@ -10,6 +10,18 @@ from llm_playground.extract import (
     extract_json,
     extract_structured,
 )
+from llm_playground.guardrails import (
+    GuardedResult,
+    Guardrail,
+    GuardrailError,
+    guarded_send,
+    max_length,
+    min_length,
+    must_match,
+    no_banned_terms,
+    no_pii_patterns,
+    run_guardrails,
+)
 from llm_playground.pricing import Pricing
 from llm_playground.promptfile import PromptError, PromptLibrary, PromptVersion, parse_prompt_file
 from llm_playground.providers import AnthropicProvider, FakeProvider, OpenAICompatProvider, scripted_reply
@@ -31,6 +43,9 @@ __all__ = [
     "EvalResult",
     "ExtractionError",
     "FakeProvider",
+    "GuardedResult",
+    "Guardrail",
+    "GuardrailError",
     "Message",
     "OpenAICompatProvider",
     "Pricing",
@@ -55,10 +70,17 @@ __all__ = [
     "extract_structured",
     "gate",
     "grounded_in_text",
+    "guarded_send",
+    "max_length",
+    "min_length",
+    "must_match",
+    "no_banned_terms",
+    "no_pii_patterns",
     "parse_prompt_file",
     "run_agent_loop",
     "run_agent_step",
     "run_case",
+    "run_guardrails",
     "run_suite",
     "percentile",
     "scripted_reply",
