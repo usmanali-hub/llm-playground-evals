@@ -352,15 +352,24 @@ class FakeProvider:
             except json.JSONDecodeError:
                 pass
         if request.tools:
-            # A reply of {"call": "<tool name>", "arguments": {...}} picks a tool, like "auto" tool_choice would;
-            # any other reply (including one that fails to parse) means the fake chose not to call anything.
+            # A reply of {"call": "<tool name>", "arguments": {...}} picks one tool, like "auto" tool_choice would;
+            # {"calls": [{"call": ..., "arguments": ...}, ...]} picks several in the same turn. Any other reply
+            # (including one that fails to parse) means the fake chose not to call anything.
+            names = {t.name for t in request.tools}
             try:
                 chosen = json.loads(text)
-                if isinstance(chosen, dict) and chosen.get("call") in {t.name for t in request.tools}:
-                    call = ToolCall("call_1", str(chosen["call"]), chosen.get("arguments"))
-                    return ChatResult("", self._usage(request, text), "tool_use", "fake", tool_calls=(call,))
             except json.JSONDecodeError:
-                pass
+                chosen = None
+            if isinstance(chosen, dict) and chosen.get("call") in names:
+                call = ToolCall("call_1", str(chosen["call"]), chosen.get("arguments"))
+                return ChatResult("", self._usage(request, text), "tool_use", "fake", tool_calls=(call,))
+            if isinstance(chosen, dict) and isinstance(chosen.get("calls"), list):
+                entries = chosen["calls"]
+                if entries and all(isinstance(e, dict) and e.get("call") in names for e in entries):
+                    calls = tuple(
+                        ToolCall(f"call_{i + 1}", str(e["call"]), e.get("arguments")) for i, e in enumerate(entries)
+                    )
+                    return ChatResult("", self._usage(request, text), "tool_use", "fake", tool_calls=calls)
         return ChatResult(text, self._usage(request, text), "end_turn", "fake")
 
     def stream(self, request: ChatRequest) -> Iterator[StreamEvent]:

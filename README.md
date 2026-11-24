@@ -46,16 +46,22 @@ the template and raises `PromptError` naming exactly which variables are missing
 
 `ToolSpec`s can now be offered as a free choice (`Chat.send(prompt, tools=(spec_a, spec_b))`, `tool_choice="auto"`
 for both providers) instead of only the single forced tool `extract_structured`'s native mode uses. `tools.py`
-wraps that into the usual pattern: a `ToolRegistry` of Python callables keyed by name, `run_agent_step(chat,
-registry, prompt)` sends the prompt with every registered tool on offer, dispatches the one the model picks (if
-any), and threads its result back with `Chat.send_tool_result(call.id, content)` — a structured, id-matched
-message (an Anthropic `tool_result` content block, or an OpenAI `role: "tool"` message with `tool_call_id`), the
-same shape a real API expects back, not a plain next user turn standing in for it.
+wraps that into two entry points, in increasing order of capability:
 
-* **Scope, stated plainly**: `run_agent_step` only acts on the model's first tool call, though `ChatResult.tool_calls`
-  can hold several (a model calling more than one tool in the same turn is not handled), and the follow-up call
-  offers no tools, so the model cannot chain a second call off the first within one `run_agent_step`. Both are the
-  natural next layer, not built here.
+* `run_agent_step(chat, registry, prompt)` dispatches only the model's first tool call and allows one follow-up
+  round with no tools offered (so the model cannot chain a second call). The simplest case; kept as-is.
+* `run_agent_loop(chat, registry, prompt, max_rounds=4)` dispatches **every** tool call the model makes in a round
+  (`ChatResult.tool_calls` can hold several — a model calling more than one tool in the same turn is handled, not
+  just `[0]`) and threads them all back together via `Chat.send_tool_results([(id, content), ...])`, offering the
+  same tools again so the model may chain further rounds, up to `max_rounds`. It returns a list of `AgentTurn`s;
+  the last one is the final plain-text reply, unless the model was still calling tools when `max_rounds` was
+  reached — that case is reported distinctly (`AgentTurn.calls` non-empty with empty `results`/`errors`), so a
+  caller can tell "the model finished" apart from "we cut it off".
+
+Either way, each tool call's result is threaded back as a structured, id-matched message (an Anthropic `tool_result`
+content block, or an OpenAI `role: "tool"` message with `tool_call_id`) — the same shape a real API expects back,
+not a plain next user turn standing in for it.
+
 * A tool that raises is caught (`ToolError`) and its message is sent back to the model as the "result", the same
   shape a real failed function call would take, instead of crashing the loop.
 * `examples/tool_calling_demo.py` is a scripted fake that always picks the same tool for a weather question; it
@@ -209,7 +215,7 @@ flowchart LR
 
 ## What is and is not verified
 
-* 224 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 231 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
   extraction and repair, the eval harness and its 30-case suite, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.

@@ -140,6 +140,78 @@ def test_send_tool_result_requires_a_preceding_tool_call() -> None:
         chat.send_tool_result("call_1", "result")
 
 
+def test_send_tool_results_threads_several_calls_from_the_same_turn() -> None:
+    import json
+
+    from llm_playground.types import ToolSpec
+
+    weather = ToolSpec("get_weather", "desc", {"type": "object", "properties": {"city": {}}})
+    add = ToolSpec("add", "desc", {"type": "object", "properties": {"a": {}, "b": {}}})
+
+    def reply(request):  # type: ignore[no-untyped-def]
+        if any(m.role == "tool" for m in request.messages):
+            return "Done: sunny, 7."
+        return json.dumps(
+            {
+                "calls": [
+                    {"call": "get_weather", "arguments": {"city": "X"}},
+                    {"call": "add", "arguments": {"a": 3, "b": 4}},
+                ]
+            }
+        )
+
+    chat = Chat(FakeProvider(reply=reply), "fake")
+    first = chat.send("weather and add?", tools=(weather, add))
+    assert len(first.tool_calls) == 2
+    c1, c2 = first.tool_calls
+
+    follow_up = chat.send_tool_results([(c1.id, "sunny"), (c2.id, "7")])
+    assert follow_up.text == "Done: sunny, 7."
+    # both tool results threaded in order, each tied to its own call id, before the final assistant reply
+    assert chat.history[-3] == Message("tool", "sunny", tool_call_id=c1.id)
+    assert chat.history[-2] == Message("tool", "7", tool_call_id=c2.id)
+    assert chat.history[-1] == Message("assistant", "Done: sunny, 7.")
+
+
+def test_send_tool_results_rejects_a_mismatched_set_of_ids() -> None:
+    import json
+
+    from llm_playground.types import ToolSpec
+
+    spec = ToolSpec("get_weather", "desc", {"type": "object", "properties": {"city": {}}})
+    chat = Chat(FakeProvider(reply=lambda r: json.dumps({"call": "get_weather", "arguments": {}})), "fake")
+    first = chat.send("weather?", tools=(spec,))
+    call = first.tool_calls[0]
+    with pytest.raises(ValueError, match="must cover exactly the pending tool_calls"):
+        chat.send_tool_results([("wrong_id", "x")])
+    with pytest.raises(ValueError, match="must cover exactly the pending tool_calls"):
+        chat.send_tool_results([(call.id, "x"), ("extra_id", "y")])
+
+
+def test_send_tool_results_can_offer_tools_for_a_chained_round() -> None:
+    import json
+
+    from llm_playground.types import ToolSpec
+
+    spec = ToolSpec("step", "desc", {"type": "object", "properties": {}})
+    calls_seen = {"n": 0}
+
+    def reply(request):  # type: ignore[no-untyped-def]
+        if any(m.role == "tool" for m in request.messages):
+            calls_seen["n"] += 1
+            if calls_seen["n"] == 1:
+                return json.dumps({"call": "step", "arguments": {}})
+            return "all done"
+        return json.dumps({"call": "step", "arguments": {}})
+
+    chat = Chat(FakeProvider(reply=reply), "fake")
+    first = chat.send("go", tools=(spec,))
+    second = chat.send_tool_results([(first.tool_calls[0].id, "ok")], tools=(spec,))
+    assert second.tool_calls  # chained: the model called the tool again instead of answering
+    third = chat.send_tool_results([(second.tool_calls[0].id, "ok")], tools=(spec,))
+    assert third.text == "all done" and not third.tool_calls
+
+
 def test_message_role_tool_requires_tool_call_id_and_vice_versa() -> None:
     with pytest.raises(ValueError, match="must carry tool_call_id"):
         Message("tool", "x")

@@ -1,12 +1,15 @@
-"""Function calling: let the model choose among several tools, run the one it picked, and continue the conversation
-with the result as a structured, id-matched tool message (`Chat.send_tool_result`) — the same message shape a real
-Anthropic/OpenAI call expects back, not a plain next user turn standing in for it.
+"""Function calling: let the model choose among several tools, run the one(s) it picked, and continue the
+conversation with each result as a structured, id-matched tool message (`Chat.send_tool_results`) — the same
+message shape a real Anthropic/OpenAI call expects back, not a plain next user turn standing in for it.
 
-Scope, stated plainly: this sends the tools with ``tool_choice="auto"`` (the model may call one, or answer in
-plain text instead) and dispatches the single call it returns through a `ToolRegistry`. What it does NOT do: handle
-a model that calls more than one tool in the same turn — `ChatResult.tool_calls` can hold several, but
-`run_agent_step` only acts on the first — or run more than one tool round (the follow-up call offers no tools, so
-the model cannot chain a second call off the first). Both are the natural next layer, not built here.
+Two entry points, in increasing order of capability:
+
+* `run_agent_step` sends the tools with ``tool_choice="auto"`` and dispatches only the model's first tool call
+  (`ChatResult.tool_calls` can hold several; this acts on `[0]`), with a single follow-up round that offers no
+  tools, so the model cannot chain a second call off the first. Kept for the simplest case and for existing code.
+* `run_agent_loop` handles both of those: every tool call in a round (not just the first) is dispatched and
+  threaded back together via `Chat.send_tool_results`, and the follow-up offers the same tools again, so the model
+  may chain further rounds, up to ``max_rounds``.
 """
 
 from __future__ import annotations
@@ -86,3 +89,55 @@ def run_agent_step(chat: Chat, registry: ToolRegistry, prompt: str) -> AgentStep
     except ToolError as err:
         follow_up = chat.send_tool_result(call.id, f"error: {err}")
         return AgentStep(reply, called=call, tool_error=str(err), follow_up=follow_up)
+
+
+@dataclass(frozen=True)
+class AgentTurn:
+    """One round of `run_agent_loop`: the model's reply and, if it called any tools this round, each call's outcome
+    (aligned by position with ``calls``). ``results[i]`` is the tool's return value, or ``None`` if ``errors[i]`` is
+    set instead (a `ToolError` message); both are ``None`` for a call that was never dispatched (see below).
+
+    The loop's last `AgentTurn` is the model's final plain-text reply (``calls`` empty), *unless* the model was
+    still calling tools when ``max_rounds`` was reached: then the last turn's ``calls`` holds those un-dispatched
+    calls with empty ``results``/``errors``, so a caller can tell "the model wanted more tool rounds than we
+    allowed" apart from "the model finished".
+    """
+
+    reply: ChatResult
+    calls: tuple[ToolCall, ...]
+    results: tuple[Any, ...]
+    errors: tuple[str | None, ...]
+
+
+def run_agent_loop(chat: Chat, registry: ToolRegistry, prompt: str, max_rounds: int = 4) -> list[AgentTurn]:
+    """Like `run_agent_step`, but handles every tool call the model makes in a round (not just the first) and lets
+    the model chain further rounds of tool calls (not just one), stopping as soon as a round's reply calls no tool
+    or ``max_rounds`` is reached.
+
+    A tool that raises (`ToolError`) does not stop the loop: its message is sent back to the model as that call's
+    "result", the same as a real API's failed function call would be, and is also recorded in the returned
+    `AgentTurn.errors`.
+    """
+    turns: list[AgentTurn] = []
+    reply = chat.send(prompt, tools=registry.specs)
+    for _ in range(max_rounds):
+        if not reply.tool_calls:
+            turns.append(AgentTurn(reply, (), (), ()))
+            return turns
+        results: list[tuple[str, str]] = []
+        values: list[Any] = []
+        errors: list[str | None] = []
+        for call in reply.tool_calls:
+            try:
+                value = registry.dispatch(call)
+                values.append(value)
+                errors.append(None)
+                results.append((call.id, repr(value)))
+            except ToolError as err:
+                values.append(None)
+                errors.append(str(err))
+                results.append((call.id, f"error: {err}"))
+        turns.append(AgentTurn(reply, reply.tool_calls, tuple(values), tuple(errors)))
+        reply = chat.send_tool_results(results, tools=registry.specs)
+    turns.append(AgentTurn(reply, reply.tool_calls, (), ()))  # max_rounds reached; these calls were never dispatched
+    return turns

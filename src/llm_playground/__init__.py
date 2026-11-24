@@ -15,12 +15,13 @@ from llm_playground.promptfile import PromptError, PromptLibrary, PromptVersion,
 from llm_playground.providers import AnthropicProvider, FakeProvider, OpenAICompatProvider, scripted_reply
 from llm_playground.retry import RetryingProvider
 from llm_playground.schema import SchemaError, validate
-from llm_playground.tools import AgentStep, Tool, ToolError, ToolRegistry, run_agent_step
+from llm_playground.tools import AgentStep, AgentTurn, Tool, ToolError, ToolRegistry, run_agent_loop, run_agent_step
 from llm_playground.tracking import Turn, UsageTracker, percentile
 from llm_playground.types import ChatRequest, ChatResult, Message, ProviderError, StreamEvent, ToolCall, ToolSpec, Usage
 
 __all__ = [
     "AgentStep",
+    "AgentTurn",
     "AnthropicProvider",
     "Chat",
     "ChatRequest",
@@ -54,6 +55,7 @@ __all__ = [
     "extract_structured",
     "grounded_in_text",
     "parse_prompt_file",
+    "run_agent_loop",
     "run_agent_step",
     "run_case",
     "run_suite",

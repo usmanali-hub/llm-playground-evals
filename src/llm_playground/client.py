@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 
 from llm_playground.pricing import Pricing
 from llm_playground.providers import Provider
@@ -75,32 +75,51 @@ class Chat:
         self._commit(text, result)
         return result
 
-    def send_tool_result(self, tool_call_id: str, content: str) -> ChatResult:
-        """Continue the conversation after a tool call, with its result threaded as a structured, id-matched
-        message (the shape a real API expects), not a plain next user turn.
+    def send_tool_results(self, results: Sequence[tuple[str, str]], tools: tuple[ToolSpec, ...] = ()) -> ChatResult:
+        """Continue the conversation after one or more tool calls from the same turn, each threaded back as its
+        own structured, id-matched message (the shape a real API expects), not a plain next user turn.
 
         Must follow a `send(..., tools=...)` call whose result had `tool_calls`; that call's assistant message
-        (carrying the matching `tool_calls`) must still be the last thing in history. No new tools are offered on
-        this follow-up call, so the model's reply here is always plain text, never another tool call.
+        (carrying the matching `tool_calls`) must still be the last thing in history, and ``results`` must cover
+        exactly those calls' ids, one ``(tool_call_id, content)`` pair each (any order).
+
+        Pass ``tools`` to let the model chain another round of tool calls off this reply; the default, no tools,
+        forces a plain-text reply, as a single-round follow-up always did before.
         """
         if not self.history or self.history[-1].role != "assistant" or not self.history[-1].tool_calls:
-            raise ValueError("send_tool_result must follow a send(...) call whose result had tool_calls")
-        self.history.append(Message("tool", content, tool_call_id=tool_call_id))
+            raise ValueError("send_tool_results must follow a send(...) call whose result had tool_calls")
+        expected = {call.id for call in self.history[-1].tool_calls}
+        given = {call_id for call_id, _ in results}
+        if given != expected:
+            raise ValueError(
+                f"results must cover exactly the pending tool_calls {sorted(expected)}, got {sorted(given)}"
+            )
+        for call_id, content in results:
+            self.history.append(Message("tool", content, tool_call_id=call_id))
         request = ChatRequest(
             self.model,
             tuple(self.history),
             self.system,
             self.max_tokens,
             self.temperature,
+            tools=tools,
             cache_system=self.cache_system,
         )
         result = self.provider.complete(request)
-        if not result.text.strip():
-            raise ProviderError("the model returned an empty reply")
-        self.history.append(Message("assistant", result.text))
+        if result.tool_calls:
+            self.history.append(Message("assistant", result.text, tool_calls=result.tool_calls))
+        else:
+            if not result.text.strip():
+                raise ProviderError("the model returned an empty reply")
+            self.history.append(Message("assistant", result.text))
         self.usage += result.usage
         self.last_result = result
         return result
+
+    def send_tool_result(self, tool_call_id: str, content: str) -> ChatResult:
+        """Single-call convenience wrapper around `send_tool_results`: thread one tool call's result back and force
+        a plain-text reply (no tools offered on the follow-up)."""
+        return self.send_tool_results([(tool_call_id, content)])
 
     def stream(self, text: str) -> Generator[str, None, None]:
         """Yield the reply piece by piece. Nothing is added to the history unless the stream finishes normally."""
