@@ -89,11 +89,36 @@ class EvalReport:
     def failed_results(self) -> tuple[EvalResult, ...]:
         return tuple(r for r in self.results if not r.passed)
 
+    @property
+    def pass_rate(self) -> float:
+        """Fraction of cases that passed, in [0, 1]. An empty suite scores 0.0, not 1.0 — an empty report proves
+        nothing, so it must not look like a clean pass to an automated gate reading this number."""
+        return self.passed / len(self.results) if self.results else 0.0
+
     def summary(self) -> str:
         lines = [f"{'PASS' if r.passed else 'FAIL'}  {r.name} — {r.detail}" for r in self.results]
-        lines.append(f"\n{self.passed}/{len(self.results)} cases passed")
+        lines.append(f"\n{self.passed}/{len(self.results)} cases passed ({self.pass_rate:.0%})")
         return "\n".join(lines)
+
+    def to_dict(self) -> dict[str, Any]:
+        """A machine-readable form of the same report, for a CI step to save as a build artifact or diff against a
+        prior run — the same data `summary()` renders as text."""
+        return {
+            "passed": self.passed,
+            "total": len(self.results),
+            "pass_rate": self.pass_rate,
+            "results": [
+                {"name": r.name, "passed": r.passed, "detail": r.detail, "attempts": r.attempts} for r in self.results
+            ],
+        }
 
 
 def run_suite(cases: Sequence[EvalCase]) -> EvalReport:
     return EvalReport(tuple(run_case(c) for c in cases))
+
+
+def gate(report: EvalReport, min_pass_rate: float = 1.0) -> bool:
+    """Whether ``report`` clears an automated CI gate: True only if its pass rate meets ``min_pass_rate`` (default:
+    every case must pass). This is the whole of what makes the runner "automated" — a number and a threshold a
+    pipeline can act on without a human reading the summary first."""
+    return report.pass_rate >= min_pass_rate

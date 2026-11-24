@@ -75,3 +75,24 @@ def test_track_flag_prints_a_latency_and_throughput_summary(capsys: pytest.Captu
 def test_cache_system_flag_parses_and_runs(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["chat", "hello", "--system", "Be brief.", "--cache-system"]) == 0
     assert "You said: hello" in capsys.readouterr().out
+
+
+def test_eval_command_runs_the_suite_and_reports_a_clean_pass(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["eval", ""]) == 0
+    out = capsys.readouterr().out
+    assert "cases passed" in out and "30/30" in out
+
+
+def test_eval_command_json_prints_a_machine_readable_report(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+
+    assert main(["eval", "", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["passed"] == data["total"] == 30
+    assert data["pass_rate"] == 1.0
+
+
+def test_eval_command_min_pass_rate_gates_the_exit_code(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["eval", "", "--min-pass-rate", "1.0"]) == 0
+    assert main(["eval", "", "--min-pass-rate", "1.1"]) == 1
+    capsys.readouterr()

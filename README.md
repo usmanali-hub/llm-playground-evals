@@ -186,6 +186,20 @@ that never passes — to prove the pipeline actually rejects bad output instead 
   `AnthropicProvider`/`OpenAICompatProvider` instead of the scripted replies; that swap needs a live provider key,
   which this sandbox does not have.
 
+### Automated, scored, and gated for CI
+
+`EvalReport` carries a numeric `pass_rate` (an empty report scores 0.0, not 1.0 — it proves nothing, and must not
+look like a clean pass to anything reading that number) and `to_dict()`, the same data as `summary()` but
+machine-readable, for a CI step to save as a build artifact or diff against a prior run. `gate(report,
+min_pass_rate=1.0)` is the actual "automated" part: a threshold a pipeline can check without a human reading the
+summary first.
+
+```bash
+python -m llm_playground eval                       # text summary, exits 1 if any case failed
+python -m llm_playground eval --json                 # the same report as JSON, for a CI artifact
+python -m llm_playground eval --min-pass-rate 0.9    # looser gate: exit 0 if at least 90% of cases passed
+```
+
 ## How it is put together
 
 ```mermaid
@@ -215,7 +229,7 @@ flowchart LR
 
 ## What is and is not verified
 
-* 231 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
+* 239 tests cover the SSE parser, both request builders, response and stream parsing (dropped streams, error events,
   invalid JSON), history and usage handling, cost arithmetic, missing keys, retry and backoff rules, the schema validator,
   extraction and repair, the eval harness and its 30-case suite, and the CLI. CI runs
   ruff, strict mypy, the tests and the offline demo.

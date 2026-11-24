@@ -2,7 +2,7 @@
 
 from llm_playground.checks import grounded_in_text, totals_match
 from llm_playground.client import Chat
-from llm_playground.evals import EvalCase, EvalReport, EvalResult, run_case, run_suite
+from llm_playground.evals import EvalCase, EvalReport, EvalResult, gate, run_case, run_suite
 from llm_playground.extract import (
     ExtractionError,
     StructuredOutputError,
@@ -53,6 +53,7 @@ __all__ = [
     "Usage",
     "extract_json",
     "extract_structured",
+    "gate",
     "grounded_in_text",
     "parse_prompt_file",
     "run_agent_loop",

@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from llm_playground.checks import grounded_in_text
 from llm_playground.client import Chat
 from llm_playground.eval_cases import CASES
-from llm_playground.evals import run_suite
+from llm_playground.evals import gate, run_suite
 from llm_playground.extract import StructuredOutputError, extract_structured
 from llm_playground.pricing import Pricing
 from llm_playground.providers import AnthropicProvider, FakeProvider, OpenAICompatProvider, Provider
@@ -69,14 +69,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--cache-system", action="store_true", help="mark the system prompt (and tool schema) as cacheable (Anthropic)"
     )
+    parser.add_argument("--json", action="store_true", help="eval: print the machine-readable report instead of text")
+    parser.add_argument(
+        "--min-pass-rate",
+        type=float,
+        default=1.0,
+        metavar="FRACTION",
+        help="eval: exit 0 only if at least this fraction of cases passed (default: 1.0, every case)",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "extract" and not args.schema:
         parser.error("extract needs --schema")
     if args.command == "eval":
         report = run_suite(CASES)
-        print(report.summary())
-        return 0 if not report.failed_results else 1
+        if args.json:
+            print(json.dumps(report.to_dict(), indent=2))
+        else:
+            print(report.summary())
+        return 0 if gate(report, args.min_pass_rate) else 1
     if args.provider != "fake" and not args.model:
         parser.error("--model is required unless --provider fake")
     if (args.price_in is None) != (args.price_out is None):

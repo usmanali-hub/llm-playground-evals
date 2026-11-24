@@ -1,5 +1,7 @@
+import pytest
+
 from llm_playground.eval_cases import CASES
-from llm_playground.evals import EvalCase, run_case, run_suite
+from llm_playground.evals import EvalCase, gate, run_case, run_suite
 
 PERSON_SCHEMA = {
     "type": "object",
@@ -73,3 +75,54 @@ def test_the_shipped_eval_suite_has_30_cases_and_all_pass() -> None:
 def test_the_shipped_eval_suite_has_unique_case_names() -> None:
     names = [case.name for case in CASES]
     assert len(names) == len(set(names))
+
+
+def test_pass_rate_is_the_fraction_of_cases_that_passed() -> None:
+    cases = [
+        EvalCase("a", "x", PERSON_SCHEMA, ['{"name": "x", "age": 1}']),
+        EvalCase("b", "x", PERSON_SCHEMA, ['{"name": "x", "age": 1}']),
+        EvalCase("c", "x", PERSON_SCHEMA, ["not json"], max_repairs=0),
+    ]
+    report = run_suite(cases)
+    assert report.pass_rate == pytest.approx(2 / 3)
+
+
+def test_pass_rate_of_an_empty_report_is_zero_not_one() -> None:
+    # an empty suite proves nothing; it must not look like a clean 100% pass to an automated gate
+    assert run_suite([]).pass_rate == 0.0
+
+
+def test_to_dict_mirrors_the_summary_as_machine_readable_data() -> None:
+    cases = [
+        EvalCase("a", "x", PERSON_SCHEMA, ['{"name": "x", "age": 1}']),
+        EvalCase("b", "x", PERSON_SCHEMA, ["not json"], max_repairs=0),
+    ]
+    data = run_suite(cases).to_dict()
+    assert data["passed"] == 1
+    assert data["total"] == 2
+    assert data["pass_rate"] == pytest.approx(0.5)
+    assert [r["name"] for r in data["results"]] == ["a", "b"]
+    assert [r["passed"] for r in data["results"]] == [True, False]
+
+
+def test_gate_defaults_to_requiring_every_case_to_pass() -> None:
+    all_pass = run_suite([EvalCase("a", "x", PERSON_SCHEMA, ['{"name": "x", "age": 1}'])])
+    one_fails = run_suite(
+        [
+            EvalCase("a", "x", PERSON_SCHEMA, ['{"name": "x", "age": 1}']),
+            EvalCase("b", "x", PERSON_SCHEMA, ["not json"], max_repairs=0),
+        ]
+    )
+    assert gate(all_pass) is True
+    assert gate(one_fails) is False
+
+
+def test_gate_accepts_a_looser_threshold() -> None:
+    one_fails = run_suite(
+        [
+            EvalCase("a", "x", PERSON_SCHEMA, ['{"name": "x", "age": 1}']),
+            EvalCase("b", "x", PERSON_SCHEMA, ["not json"], max_repairs=0),
+        ]
+    )
+    assert gate(one_fails, min_pass_rate=0.5) is True
+    assert gate(one_fails, min_pass_rate=0.51) is False
