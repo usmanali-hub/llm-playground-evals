@@ -1,0 +1,187 @@
+{
+  "passed": 30,
+  "total": 30,
+  "pass_rate": 1.0,
+  "results": [
+    {
+      "name": "object_required_fields",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "nested_array_of_objects",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "string_enum",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "boolean_and_null",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "array_of_strings",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "min_max_items",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "one_of_shape",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "all_of_shape",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "local_ref_and_defs",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "prefix_items_tuple",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "unique_items",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "fenced_code_block_reply",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "prose_wrapped_reply",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "repair_missing_field",
+      "passed": true,
+      "detail": "valid in 2 attempt(s)",
+      "attempts": 2
+    },
+    {
+      "name": "repair_wrong_type",
+      "passed": true,
+      "detail": "valid in 2 attempt(s)",
+      "attempts": 2
+    },
+    {
+      "name": "repair_negative_violates_minimum",
+      "passed": true,
+      "detail": "valid in 2 attempt(s)",
+      "attempts": 2
+    },
+    {
+      "name": "repair_two_rounds",
+      "passed": true,
+      "detail": "valid in 3 attempt(s)",
+      "attempts": 3
+    },
+    {
+      "name": "repair_enum_value_fixed",
+      "passed": true,
+      "detail": "valid in 2 attempt(s)",
+      "attempts": 2
+    },
+    {
+      "name": "grounded_in_text_pass",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "grounded_in_text_catches_fabrication_then_repairs",
+      "passed": true,
+      "detail": "valid in 2 attempt(s)",
+      "attempts": 2
+    },
+    {
+      "name": "grounded_in_text_number_forms",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "totals_match_pass",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "totals_match_catches_arithmetic_error_then_repairs",
+      "passed": true,
+      "detail": "valid in 2 attempt(s)",
+      "attempts": 2
+    },
+    {
+      "name": "native_tool_call_basic",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "native_tool_call_with_check",
+      "passed": true,
+      "detail": "valid in 1 attempt(s)",
+      "attempts": 1
+    },
+    {
+      "name": "native_tool_call_repairs_bad_value",
+      "passed": true,
+      "detail": "valid in 2 attempt(s)",
+      "attempts": 2
+    },
+    {
+      "name": "exhausts_repairs_on_persistent_garbage",
+      "passed": true,
+      "detail": "failed to validate, as expected",
+      "attempts": 3
+    },
+    {
+      "name": "exhausts_repairs_on_persistent_schema_violation",
+      "passed": true,
+      "detail": "failed to validate, as expected",
+      "attempts": 3
+    },
+    {
+      "name": "exhausts_repairs_when_check_never_passes",
+      "passed": true,
+      "detail": "failed to validate, as expected",
+      "attempts": 3
+    },
+    {
+      "name": "missing_required_field_never_supplied",
+      "passed": true,
+      "detail": "failed to validate, as expected",
+      "attempts": 3
+    }
+  ]
+}

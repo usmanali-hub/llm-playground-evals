@@ -25,6 +25,31 @@ python -m llm_playground chat --provider anthropic --model <model-name> --system
 server (Ollama by default at `localhost:11434`, or any vLLM / llama.cpp server via `--url`) and needs no key.
 Model names and prices are never built in: they change, so you pass the ones you use.
 
+## See it work (one command)
+
+```bash
+make install   # once
+make demo      # a streamed chat reply, a structured-extraction repair demo, and the 30-case eval report
+make test      # the full test suite
+```
+
+`eval_report.json` at the repo root is the same report `make demo`'s eval step prints, committed so it can be read
+without running anything; `make report` regenerates it, and a test (`tests/test_eval_report.py`) fails CI if the
+committed file and a fresh run of the suite disagree, so it cannot go stale silently.
+
+## What's in this repo, at a glance
+
+| Piece | What it does | Section |
+| --- | --- | --- |
+| `Chat` / providers | Multi-turn history, streaming, retries, token/cost accounting, offline fake provider | below |
+| `extract_structured` | JSON Schema-checked extraction with a parse/validate/repair loop, native tool mode | [Structured output](#structured-output-json-that-matches-a-schema) |
+| `PromptLibrary` | Versioned prompts as files, not strings in code | [Prompt versioning](#prompt-versioning-in-files) |
+| `run_agent_step` / `run_agent_loop` | Multi-tool function calling, single-call or multi-round | [Function/tool calling](#functiontool-calling-a-model-choosing-among-several-tools) |
+| `UsageTracker` | Per-call latency, time-to-first-token, cost | [Tokens, cost and latency](#tokens-cost-and-latency-tracking) |
+| `run_batch` / `extract_model` | Concurrent batching; Pydantic-validated extraction | [Concurrent batching](#concurrent-batching), [Pydantic](#pydantic-validated-extraction) |
+| `guarded_send` | Plain-text output guardrails with a repair loop | [Output guardrails](#output-guardrails-with-a-repair-loop) |
+| `run_suite` / `gate` | A scored, CI-gatable eval suite over the extraction pipeline | [Eval sets](#eval-sets) |
+
 ## Prompt versioning in files
 
 Prompts live as files under `prompts/<name>/v<N>.prompt` instead of strings embedded in code: a small frontmatter
